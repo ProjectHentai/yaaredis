@@ -553,3 +553,6 @@ class StrictRedisCluster(StrictRedis, *cluster_mixins):
             transaction=transaction,
             watches=watches,
         )
+
+Redis = StrictRedis
+RedisCluster = StrictRedisCluster

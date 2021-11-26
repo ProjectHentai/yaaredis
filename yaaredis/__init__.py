@@ -1,8 +1,7 @@
-from pkg_resources import get_distribution
-__version__ = get_distribution('yaaredis').version
+__version__ = "2.0.4"
 
-from .client import StrictRedis
-from .client import StrictRedisCluster
+from .client import StrictRedis, Redis
+from .client import StrictRedisCluster, RedisCluster
 from .connection import ClusterConnection
 from .connection import Connection
 from .connection import UnixDomainSocketConnection
@@ -35,17 +34,16 @@ from .pool import BlockingConnectionPool
 from .pool import ClusterConnectionPool
 from .pool import ConnectionPool
 
-
 __all__ = [
-    'StrictRedis', 'StrictRedisCluster',
-    'Connection', 'UnixDomainSocketConnection', 'ClusterConnection',
-    'ConnectionPool', 'ClusterConnectionPool', 'BlockingConnectionPool',
-    'AuthenticationFailureError', 'AuthenticationRequiredError',
-    'BusyLoadingError', 'CacheError', 'ClusterCrossSlotError',
-    'ClusterDownError', 'ClusterDownException', 'ClusterError',
-    'ClusterUnreachableError', 'CompressError', 'ConnectionError', 'DataError',
-    'ExecAbortError', 'InvalidResponse', 'LockError', 'NoPermissionError',
-    'NoScriptError', 'PubSubError', 'ReadOnlyError', 'RedisClusterError',
-    'RedisClusterException', 'RedisError', 'ResponseError', 'TimeoutError',
-    'WatchError',
+    "StrictRedis", "StrictRedisCluster", "Redis", "RedisCluster",
+    "Connection", "UnixDomainSocketConnection", "ClusterConnection",
+    "ConnectionPool", "ClusterConnectionPool", "BlockingConnectionPool",
+    "AuthenticationFailureError", "AuthenticationRequiredError",
+    "BusyLoadingError", "CacheError", "ClusterCrossSlotError",
+    "ClusterDownError", "ClusterDownException", "ClusterError",
+    "ClusterUnreachableError", "CompressError", "ConnectionError", "DataError",
+    "ExecAbortError", "InvalidResponse", "LockError", "NoPermissionError",
+    "NoScriptError", "PubSubError", "ReadOnlyError", "RedisClusterError",
+    "RedisClusterException", "RedisError", "ResponseError", "TimeoutError",
+    "WatchError",
 ]
