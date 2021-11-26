@@ -2,7 +2,7 @@
 import re
 import sys
 import pathlib
-
+from collections import defaultdict
 
 try:
     from setuptools import setup
@@ -32,6 +32,13 @@ except ImportError:
     def PyTest(x):
         x
 
+BUILD_ARGS = defaultdict(lambda: ['-O3', '-g0'])
+
+for compiler, args in [
+    ('msvc', ['/EHsc', '/DHUNSPELL_STATIC', "/Oi", "/O2", "/Ot"]),
+    ('gcc', ['-O3', '-g0'])]:
+    BUILD_ARGS[compiler] = args
+
 
 class custom_build_ext(build_ext):
     """
@@ -43,7 +50,7 @@ class custom_build_ext(build_ext):
     warning_message = """
 ********************************************************************
 {target} could not
-be compiled. No C extensions are essential for aredis to run,
+be compiled. No C extensions are essential for yaaredis to run,
 although they do result in significant speed improvements for
 websockets.
 {comment}
@@ -77,6 +84,13 @@ https://api.mongodb.org/python/current/installation.html#osx
                     )
                 )
             )
+
+    def build_extensions(self):
+        compiler = self.compiler.compiler_type
+        args = BUILD_ARGS[compiler]
+        for ext in self.extensions:
+            ext.extra_compile_args = args
+        super().build_extensions()
 
     def build_extension(self, ext):
         try:
@@ -150,5 +164,7 @@ setup(
     # the one from the standard library will be used.
     install_requires=[
         'contextvars;python_version<"3.7"'
-    ]
+    ],
+    include_package_data=True,
+    zip_safe=False
 )
