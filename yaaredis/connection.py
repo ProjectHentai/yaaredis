@@ -1,3 +1,4 @@
+import sys
 import asyncio
 import inspect
 import logging
@@ -432,8 +433,8 @@ class BaseConnection:
         except (TimeoutError, yaaredis.compat.CancelledError):
             raise
         except Exception as e:
-            raise ConnectionError('Error during initial connection') from e
-
+            e = sys.exc_info()[1]
+            raise ConnectionError("Error during initial connection: %s" % (e.args,)) from e
         # run any user callbacks. right now the only internal callback
         # is for pubsub channel/pattern resubscription
         for callback in self._connect_callbacks:
