@@ -46,6 +46,18 @@ class WatchError(RedisError):
     pass
 
 
+class AuthenticationWrongNumberOfArgsError(ResponseError):
+    """
+    An error to indicate that the wrong number of args
+    were sent to the AUTH command
+    """
+    pass
+
+
+class ModuleError(ResponseError):
+    pass
+
+
 class NoScriptError(ResponseError):
     pass
 

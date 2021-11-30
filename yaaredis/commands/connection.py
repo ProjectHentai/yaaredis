@@ -12,11 +12,11 @@ class ConnectionCommandMixin:
     }
 
     async def echo(self, value):
-        'Echo the string back from the server'
+        """Echo the string back from the server"""
         return await self.execute_command('ECHO', value)
 
     async def ping(self):
-        'Ping the Redis server'
+        """Ping the Redis server"""
         return await self.execute_command('PING')
 
 

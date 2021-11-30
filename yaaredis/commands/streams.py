@@ -393,7 +393,7 @@ class StreamsCommandMixin:
         """
         return await self.execute_command('XCLAIM', name, group, consumer, min_idle_time, *stream_ids)
 
-    async def xgroup_create(self, name: str, group: str, stream_id='$') -> bool:
+    async def xgroup_create(self, name: str, group: str, stream_id='$', mkstream: bool = False) -> bool:
         """
         [NOTICE] Not officially released yet
         XGROUP is used in order to create, destroy and manage consumer groups.
@@ -406,7 +406,10 @@ class StreamsCommandMixin:
             in the stream history to start with.
             Of course, you can specify any other valid ID
         """
-        return await self.execute_command('XGROUP CREATE', name, group, stream_id)
+        pieces = [name, group, stream_id]
+        if mkstream:
+            pieces.append("MKSTREAM")
+        return await self.execute_command('XGROUP CREATE', *pieces)
 
     async def xgroup_set_id(self, name: str, group: str, stream_id: str) -> bool:
         """

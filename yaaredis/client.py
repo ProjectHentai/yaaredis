@@ -88,7 +88,7 @@ class StrictRedis(*mixins):
     """
 
     RESPONSE_CALLBACKS = dict_merge(
-        *(mixin.RESPONSE_CALLBACKS for mixin in mixins))
+        *(mixin.RESPONSE_CALLBACKS for mixin in mixins))  # todo add module
 
     @classmethod
     def from_url(cls, url, db=None, **kwargs):

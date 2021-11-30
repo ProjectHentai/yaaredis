@@ -61,12 +61,24 @@ class HashCommandMixin:
         """Returns the number of elements in hash ``name``"""
         return await self.execute_command('HLEN', name)
 
-    async def hset(self, name, key, value):
+    async def hset(self, name, key=None, value=None, mapping=None):
         """
-        Sets ``key`` to ``value`` within hash ``name``
-        Returns 1 if HSET created a new field, otherwise 0
+        Set ``key`` to ``value`` within hash ``name``,
+        ``mapping`` accepts a dict of key/value pairs that will be
+        added to hash ``name``.
+        Returns the number of fields that were added.
+
+        For more information check https://redis.io/commands/hset
         """
-        return await self.execute_command('HSET', name, key, value)
+        if key is None and not mapping:
+            raise DataError("'hset' with no key value pairs")
+        items = []
+        if key is not None:
+            items.extend((key, value))
+        if mapping:
+            for pair in mapping.items():
+                items.extend(pair)
+        return await self.execute_command('HSET', name, *items)
 
     async def hsetnx(self, name, key, value):
         """

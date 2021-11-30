@@ -1,6 +1,7 @@
 import hashlib
 import time
 import zlib
+from typing import Union, Type
 
 try:
     import ujson as json
@@ -10,6 +11,7 @@ except ImportError:
 from .utils import b
 from .exceptions import (SerializeError,
                          CompressError)
+from .typing import ByteOrStr, Number, Redis
 
 
 class IdentityGenerator:
@@ -20,21 +22,21 @@ class IdentityGenerator:
 
     TEMPLATE = '{app}:{key}:{content}'
 
-    def __init__(self, app, encoding='utf-8'):
+    def __init__(self, app: str, encoding: str = 'utf-8'):
         self.app = app
         self.encoding = encoding
 
-    def _trans_type(self, content):
+    def _trans_type(self, content: Union[str, int, bytes]) -> bytes:
         if isinstance(content, str):
-            content = content.encode(self.encoding)
+            content = content.encode(self.encoding)  # type: bytes
         elif isinstance(content, int):
-            content = b(str(content))
+            content = b(str(content))  # type: bytes
         elif isinstance(content, float):
-            content = b(repr(content))
+            content = b(repr(content))  # type: bytes
         return content
 
-    def generate(self, key, content):
-        content = self._trans_type(content)
+    def generate(self, key: str, content: Union[str, int, bytes]) -> str:
+        content = self._trans_type(content)  # type: bytes
         md5 = hashlib.md5()
         md5.update(content)
         hash_ = md5.hexdigest()
@@ -54,7 +56,7 @@ class Compressor:
     def __init__(self, encoding='utf-8'):
         self.encoding = encoding
 
-    def _trans_type(self, content):
+    def _trans_type(self, content: Union[str, int, float, bytes]) -> bytes:
         if isinstance(content, str):
             content = content.encode(self.encoding)
         elif isinstance(content, int):
@@ -66,8 +68,8 @@ class Compressor:
                 f'Wrong data type({type(content)}) to compress')
         return content
 
-    def compress(self, content):
-        content = self._trans_type(content)
+    def compress(self, content: Union[str, int, float, bytes]) -> bytes:
+        content = self._trans_type(content)  # type: bytes
         if len(content) > self.min_length:
             try:
                 return zlib.compress(content, self.preset)
@@ -75,8 +77,8 @@ class Compressor:
                 raise CompressError('Content can not be compressed.') from e
         return content
 
-    def decompress(self, content):
-        content = self._trans_type(content)
+    def decompress(self, content: Union[str, int, float, bytes]) -> bytes:
+        content = self._trans_type(content)  # type: bytes
         try:
             return zlib.decompress(content)
         except zlib.error as e:
@@ -89,10 +91,10 @@ class Serializer:
     your own Serializer implementing `serialize` and `deserialize` methods.
     """
 
-    def __init__(self, encoding='utf-8'):
+    def __init__(self, encoding: str = 'utf-8'):
         self.encoding = encoding
 
-    def _trans_type(self, content):
+    def _trans_type(self, content: ByteOrStr) -> str:
         if isinstance(content, bytes):
             content = content.decode(self.encoding)
         if not isinstance(content, str):
@@ -101,14 +103,14 @@ class Serializer:
         return content
 
     @staticmethod
-    def serialize(content):
+    def serialize(content: dict) -> str:
         try:
             return json.dumps(content)
         except Exception as e:
             raise SerializeError('Content can not be serialized.') from e
 
-    def deserialize(self, content):
-        content = self._trans_type(content)
+    def deserialize(self, content: ByteOrStr) -> dict:
+        content = self._trans_type(content)  # type: str
         try:
             return json.loads(content)
         except Exception as e:
@@ -118,9 +120,12 @@ class Serializer:
 class BasicCache:
     """Basic cache class, should not be used explicitly"""
 
-    def __init__(self, client, app='', identity_generator_class=IdentityGenerator,
-                 compressor_class=Compressor, serializer_class=Serializer,
-                 encoding='utf-8'):
+    def __init__(self, client: Redis,
+                 app: str = '',
+                 identity_generator_class: Type[IdentityGenerator] = IdentityGenerator,
+                 compressor_class: Type[Compressor] = Compressor,
+                 serializer_class: Type[Serializer] = Serializer,
+                 encoding: str = 'utf-8'):
         self.client = client
         self.identity_generator = self.compressor = self.serializer = None
         # set identity generator, compressor and serializer to None if not needed
@@ -134,19 +139,19 @@ class BasicCache:
     def __repr__(self):
         return f'{type(self).__name__}<{repr(self.client)}>'
 
-    def _gen_identity(self, key, param=None):
+    def _gen_identity(self, key: str, param=None) -> str:
         """generate identity according to key and param given"""
         if self.identity_generator and param is not None:
             if self.serializer:
-                param = self.serializer.serialize(param)
+                param = self.serializer.serialize(param)  # type: str
             if self.compressor:
-                param = self.compressor.compress(param)
+                param = self.compressor.compress(param)  # type: bytes
             identity = self.identity_generator.generate(key, param)
         else:
             identity = key
         return identity
 
-    def _pack(self, content):
+    def _pack(self, content) -> ByteOrStr:
         """Packs the content using serializer and compressor"""
         if self.serializer:
             content = self.serializer.serialize(content)
@@ -165,7 +170,7 @@ class BasicCache:
             content = self.serializer.deserialize(content)
         return content
 
-    async def delete(self, key, param=None):
+    async def delete(self, key: str, param=None):
         """
         Deletes cache corresponding to identity
         generated from key and param
@@ -173,7 +178,7 @@ class BasicCache:
         identity = self._gen_identity(key, param)
         return await self.client.delete(identity)
 
-    async def delete_pattern(self, pattern, count=None):
+    async def delete_pattern(self, pattern: str, count=None) -> int:
         """
         Deletes cache according to pattern in redis,
         delete `count` keys each time
@@ -187,12 +192,12 @@ class BasicCache:
             count_deleted += await self.client.delete(*identities)
         return count_deleted
 
-    async def exist(self, key, param=None):
+    async def exist(self, key: str, param=None) -> bool:
         """Checks if specific identity exists"""
         identity = self._gen_identity(key, param)
         return await self.client.exists(identity)
 
-    async def ttl(self, key, param=None):
+    async def ttl(self, key: str, param=None) -> Number:
         """Gets time to live of a specific identity"""
         identity = self._gen_identity(key, param)
         return await self.client.ttl(identity)
@@ -208,7 +213,7 @@ class Cache(BasicCache):
             res = self._unpack(res)
         return res
 
-    async def set(self, key, value, param=None, expire_time=None):
+    async def set(self, key: str, value, param=None, expire_time: Number = None):
         identity = self._gen_identity(key, param)
         value = self._pack(value)
         return await self.client.set(identity, value, ex=expire_time)
@@ -241,7 +246,7 @@ class HerdCache(BasicCache):
                          compressor_class, serializer_class,
                          encoding)
 
-    async def set(self, key, value, param=None, expire_time=None, herd_timeout=None):
+    async def set(self, key: str, value, param=None, expire_time=None, herd_timeout=None):
         """
         Uses key and param to generate identity and pack the content,
         expire the key within real_timeout if expire_time is given.

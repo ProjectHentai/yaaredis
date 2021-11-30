@@ -9,7 +9,8 @@ from .exceptions import LockError
 from .exceptions import WatchError
 from .utils import b
 from .utils import dummy
-
+from .pipeline import BasePipeline
+from .typing import Number
 
 logger = logging.getLogger(__name__)
 
@@ -84,7 +85,7 @@ class Lock:
         self.blocking_timeout = blocking_timeout
         self.thread_local = bool(thread_local)
         self.local = contextvars.ContextVar(
-            'token', default=None) if self.thread_local else dummy()
+            'token', default=None) if self.thread_local else dummy()  # type: contextvars.ContextVar[bytes]
         if self.timeout and self.sleep > self.timeout:
             raise LockError("'sleep' must be less than 'timeout'")
 
@@ -144,18 +145,18 @@ class Lock:
         self.local.set(None)
         await self.do_release(expected_token)
 
-    async def do_release(self, expected_token):
+    async def do_release(self, expected_token: bytes):
         name = self.name
 
-        async def execute_release(pipe):
+        async def execute_release(pipe: BasePipeline):
             lock_value = await pipe.get(name)
-            if lock_value != expected_token:
+            if b(lock_value) != expected_token:
                 raise LockError("Cannot release a lock that's no longer owned")
             await pipe.delete(name)
 
         await self.redis.transaction(execute_release, name)
 
-    async def extend(self, additional_time):
+    async def extend(self, additional_time: Number):
         """
         Adds more time to an already acquired lock.
 
@@ -169,7 +170,7 @@ class Lock:
         return await self.do_extend(additional_time)
 
     async def do_extend(self, additional_time):
-        pipe = await self.redis.pipeline()
+        pipe = await self.redis.pipeline()  # type: BasePipeline
         await pipe.watch(self.name)
         lock_value = await pipe.get(self.name)
         if lock_value != self.local.get():
