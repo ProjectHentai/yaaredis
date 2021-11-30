@@ -103,7 +103,7 @@ class StringsCommandMixin:
             params.append(start)
             params.append(end)
         elif ((start is not None and end is None)
-                or (end is not None and start is None)):
+              or (end is not None and start is None)):
             raise RedisError('Both start and end must be specified')
         return await self.execute_command('BITCOUNT', *params)
 
@@ -241,7 +241,8 @@ class StringsCommandMixin:
             time_ms = (time_ms.seconds + time_ms.days * 24 * 3600) * 1000 + ms
         return await self.execute_command('PSETEX', name, time_ms, value)
 
-    async def set(self, name, value, ex=None, px=None, keepttl=False, nx=False, xx=False):
+    async def set(self, name, value, ex=None, px=None, exat=None, pxat=None, keepttl=False, nx=False, xx=False,
+                  get: bool = False):
         """
         Set the value at key ``name`` to ``value``
 
@@ -270,6 +271,17 @@ class StringsCommandMixin:
                 ms = int(px.microseconds / 1000)
                 px = (px.seconds + px.days * 24 * 3600) * 1000 + ms
             pieces.append(px)
+        if exat is not None:
+            pieces.append('EXAT')
+            if isinstance(exat, datetime.timedelta):
+                exat = exat.seconds + exat.days * 24 * 3600
+            pieces.append(exat)
+        if pxat is not None:
+            pieces.append('PXAT')
+            if isinstance(pxat, datetime.timedelta):
+                ms = int(pxat.microseconds / 1000)
+                pxat = (pxat.seconds + pxat.days * 24 * 3600) * 1000 + ms
+            pieces.append(pxat)
 
         if keepttl:
             pieces.append('KEEPTTL')
@@ -277,6 +289,8 @@ class StringsCommandMixin:
             pieces.append('NX')
         if xx:
             pieces.append('XX')
+        if get:
+            pieces.append('GET')
         return await self.execute_command('SET', *pieces)
 
     async def setbit(self, name, offset, value):
@@ -329,7 +343,6 @@ class StringsCommandMixin:
 
 
 class ClusterStringsCommandMixin(StringsCommandMixin):
-
     NODES_FLAGS = {
         'BITOP': NodeFlag.BLOCKED,
     }

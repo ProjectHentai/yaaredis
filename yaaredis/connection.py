@@ -1,47 +1,89 @@
+from packaging.version import Version
 import sys
 import asyncio
 import inspect
+import errno
 import logging
 import os
 import socket
-import ssl
 import time
 from io import BytesIO
 
 import yaaredis.compat
-from yaaredis.exceptions import AskError
-from yaaredis.exceptions import AuthenticationFailureError
-from yaaredis.exceptions import AuthenticationRequiredError
-from yaaredis.exceptions import BusyLoadingError
-from yaaredis.exceptions import ClusterCrossSlotError
-from yaaredis.exceptions import ClusterDownError
-from yaaredis.exceptions import ConnectionError  # pylint: disable=redefined-builtin
-from yaaredis.exceptions import ExecAbortError
-from yaaredis.exceptions import InvalidResponse
-from yaaredis.exceptions import MovedError
-from yaaredis.exceptions import NoPermissionError
-from yaaredis.exceptions import NoScriptError
-from yaaredis.exceptions import ReadOnlyError
-from yaaredis.exceptions import RedisError
-from yaaredis.exceptions import ResponseError
-from yaaredis.exceptions import TimeoutError  # pylint: disable=redefined-builtin
-from yaaredis.exceptions import TryAgainError
-from yaaredis.utils import b
-from yaaredis.utils import nativestr
+from yaaredis.exceptions import (AskError,
+                                 AuthenticationFailureError,
+                                 AuthenticationRequiredError,
+                                 BusyLoadingError,
+                                 AuthenticationWrongNumberOfArgsError,
+                                 ModuleError,
+                                 ClusterCrossSlotError,
+                                 ClusterDownError,
+                                 ConnectionError,  # pylint: disable=redefined-builtin
+                                 ExecAbortError,
+                                 InvalidResponse,
+                                 MovedError,
+                                 NoPermissionError,
+                                 NoScriptError,
+                                 ReadOnlyError,
+                                 RedisError,
+                                 ResponseError,
+                                 TimeoutError,  # pylint: disable=redefined-builtin
+                                 TryAgainError,
+                                 DataError)
+from yaaredis.utils import b, nativestr, HIREDIS_AVAILABLE
 
 try:
+    import ssl
+
+    ssl_available = True
+except ImportError:
+    ssl_available = False
+
+NONBLOCKING_EXCEPTION_ERROR_NUMBERS = {
+    BlockingIOError: errno.EWOULDBLOCK,
+}
+
+if ssl_available:
+    if hasattr(ssl, 'SSLWantReadError'):
+        NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLWantReadError] = 2
+        NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLWantWriteError] = 2
+    else:
+        NONBLOCKING_EXCEPTION_ERROR_NUMBERS[ssl.SSLError] = 2
+
+NONBLOCKING_EXCEPTIONS = tuple(NONBLOCKING_EXCEPTION_ERROR_NUMBERS.keys())
+
+if HIREDIS_AVAILABLE:
     import hiredis
 
-    HIREDIS_AVAILABLE = True
-except ImportError:
-    HIREDIS_AVAILABLE = False
+    hiredis_version = Version(hiredis.__version__)
+    HIREDIS_SUPPORTS_CALLABLE_ERRORS = \
+        hiredis_version >= Version('0.1.3')
+    HIREDIS_SUPPORTS_BYTE_BUFFER = \
+        hiredis_version >= Version('0.1.4')
+    HIREDIS_SUPPORTS_ENCODING_ERRORS = \
+        hiredis_version >= Version('1.0.0')
 
-SYM_STAR = b('*')
-SYM_DOLLAR = b('$')
-SYM_CRLF = b('\r\n')
-SYM_LF = b('\n')
-SYM_EMPTY = b('')
+    HIREDIS_USE_BYTE_BUFFER = True
+    # only use byte buffer if hiredis supports it
+    if not HIREDIS_SUPPORTS_BYTE_BUFFER:
+        HIREDIS_USE_BYTE_BUFFER = False
 
+SYM_STAR = b'*'
+SYM_DOLLAR = b'$'
+SYM_CRLF = b'\r\n'
+SYM_EMPTY = b''
+
+SERVER_CLOSED_CONNECTION_ERROR = "Connection closed by server."
+
+SENTINEL = object()
+MODULE_LOAD_ERROR = 'Error loading the extension. ' \
+                    'Please check the server logs.'
+NO_SUCH_MODULE_ERROR = 'Error unloading module: no such module with that name'
+MODULE_UNLOAD_NOT_POSSIBLE_ERROR = 'Error unloading module: operation not ' \
+                                   'possible.'
+MODULE_EXPORTS_DATA_TYPES_ERROR = "Error unloading module: the module " \
+                                  "exports one or more module-side data " \
+                                  "types, can't unload"
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +93,43 @@ async def exec_with_timeout(coroutine, timeout):
         return await asyncio.wait_for(coroutine, timeout)
     except asyncio.TimeoutError as exc:
         raise TimeoutError(exc) from exc
+
+
+class Encoder:
+    """Encode strings to bytes-like and decode bytes-like to strings"""
+
+    def __init__(self, encoding, encoding_errors, decode_responses):
+        self.encoding = encoding
+        self.encoding_errors = encoding_errors
+        self.decode_responses = decode_responses
+
+    def encode(self, value):
+        """Return a bytestring or bytes-like representation of the value"""
+        if isinstance(value, (bytes, memoryview)):
+            return value
+        elif isinstance(value, bool):
+            # special case bool since it is a subclass of int
+            raise DataError("Invalid input of type: 'bool'. Convert to a "
+                            "bytes, string, int or float first.")
+        elif isinstance(value, (int, float)):
+            value = repr(value).encode()
+        elif not isinstance(value, str):
+            # a value we don't know how to deal with. throw an error
+            typename = type(value).__name__
+            raise DataError("Invalid input of type: '%s'. Convert to a "
+                            "bytes, string, int or float first." % typename)
+        if isinstance(value, str):
+            value = value.encode(self.encoding, self.encoding_errors)
+        return value
+
+    def decode(self, value, force=False):
+        """Return a unicode string from the bytes-like representation"""
+        if self.decode_responses or force:
+            if isinstance(value, memoryview):
+                value = value.tobytes()
+            if isinstance(value, bytes):
+                value = value.decode(self.encoding, self.encoding_errors)
+        return value
 
 
 class SocketBuffer:
@@ -146,11 +225,23 @@ class SocketBuffer:
 
 
 class BaseParser:
-    """Plain Python parsing class"""
-
     EXCEPTION_CLASSES = {
         'ERR': {
             'max number of clients reached': ConnectionError,
+            'Client sent AUTH, but no password is set': AuthenticationRequiredError,
+            'invalid password': AuthenticationFailureError,
+            # some Redis server versions report invalid command syntax
+            # in lowercase
+            'wrong number of arguments for \'auth\' command':
+                AuthenticationWrongNumberOfArgsError,
+            # some Redis server versions report invalid command syntax
+            # in uppercase
+            'wrong number of arguments for \'AUTH\' command':
+                AuthenticationWrongNumberOfArgsError,
+            MODULE_LOAD_ERROR: ModuleError,
+            MODULE_EXPORTS_DATA_TYPES_ERROR: ModuleError,
+            NO_SUCH_MODULE_ERROR: ModuleError,
+            MODULE_UNLOAD_NOT_POSSIBLE_ERROR: ModuleError,
         },
         'EXECABORT': ExecAbortError,
         'LOADING': BusyLoadingError,
@@ -164,7 +255,7 @@ class BaseParser:
         'WRONGPASS': AuthenticationFailureError,
         'NOAUTH': AuthenticationRequiredError,
         'NOPERM': NoPermissionError,
-    }
+    }  # todo port from redis-py 4.0
 
     def parse_error(self, response):
         """Parse an error response"""
@@ -384,7 +475,7 @@ class BaseConnection:
 
     def __init__(self, retry_on_timeout=False, stream_timeout=None,
                  parser_class=DefaultParser, reader_read_size=65535,
-                 encoding='utf-8', decode_responses=False,
+                 encoding='utf-8', encoding_errors='strict', decode_responses=False, health_check_interval=0,
                  *, client_name=None, loop=None):
         self._parser = parser_class(reader_read_size)
         self._stream_timeout = stream_timeout
@@ -403,7 +494,11 @@ class BaseConnection:
         self.client_name = client_name
         # flag to show if a connection is waiting for response
         self.awaiting_response = False
+        self.health_check_interval = health_check_interval  # todo this and retry
+        self.next_health_check = 0
+        self.encoder = Encoder(encoding, encoding_errors, decode_responses)
         self.last_active_at = time.time()
+        self._buffer_cutoff = 6000
 
     def __repr__(self):
         return self.description.format(**self._description_args)
@@ -549,33 +644,36 @@ class BaseConnection:
         self._writer = None
 
     def pack_command(self, *args):
-        'Pack a series of arguments into the Redis protocol'
+        """Pack a series of arguments into the Redis protocol"""
         output = []
         # the client might have included 1 or more literal arguments in
         # the command name, e.g., 'CONFIG GET'. The Redis server expects these
         # arguments to be sent separately, so split the first argument
-        # manually. All of these arguements get wrapped in the Token class
-        # to prevent them from being encoded.
-        command = args[0]
-        if ' ' in command:
-            args = tuple(b(s) for s in command.split()) + args[1:]
-        else:
-            args = (b(command),) + args[1:]
+        # manually. These arguments should be bytestrings so that they are
+        # not encoded.
+        if isinstance(args[0], str):
+            args = tuple(args[0].encode().split()) + args[1:]
+        elif b' ' in args[0]:
+            args = tuple(args[0].split()) + args[1:]
 
-        buff = SYM_EMPTY.join(
-            (SYM_STAR, b(str(len(args))), SYM_CRLF))
-        for arg in map(self.encode, args):
+        buff = SYM_EMPTY.join((SYM_STAR, str(len(args)).encode(), SYM_CRLF))
+
+        buffer_cutoff = self._buffer_cutoff
+        for arg in map(self.encoder.encode, args):
             # to avoid large string mallocs, chunk the command into the
-            # output list if we're sending large values
-            if len(buff) > 6000 or len(arg) > 6000:
+            # output list if we're sending large values or memoryviews
+            arg_length = len(arg)
+            if (len(buff) > buffer_cutoff or arg_length > buffer_cutoff
+                    or isinstance(arg, memoryview)):
                 buff = SYM_EMPTY.join(
-                    (buff, SYM_DOLLAR, b(str(len(arg))), SYM_CRLF))
+                    (buff, SYM_DOLLAR, str(arg_length).encode(), SYM_CRLF))
                 output.append(buff)
-                output.append(b(arg))
+                output.append(arg)
                 buff = SYM_CRLF
             else:
-                buff = SYM_EMPTY.join((buff, SYM_DOLLAR, b(str(len(arg))),
-                                       SYM_CRLF, b(arg), SYM_CRLF))
+                buff = SYM_EMPTY.join(
+                    (buff, SYM_DOLLAR, str(arg_length).encode(),
+                     SYM_CRLF, arg, SYM_CRLF))
         output.append(buff)
         return output
 
@@ -690,7 +788,7 @@ class UnixDomainSocketConnection(BaseConnection):
 
 
 class ClusterConnection(Connection):
-    'Manages TCP communication to and from a Redis server'
+    """Manages TCP communication to and from a Redis server"""
     description = 'ClusterConnection<host={host},port={port}>'
 
     def __init__(self, *args, **kwargs):

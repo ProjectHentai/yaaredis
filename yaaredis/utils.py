@@ -3,6 +3,12 @@ from functools import wraps
 from .exceptions import ClusterDownError
 from .exceptions import RedisClusterException
 
+try:
+    import hiredis  # noqa
+
+    HIREDIS_AVAILABLE = True
+except ImportError:
+    HIREDIS_AVAILABLE = False
 
 _C_EXTENSION_SPEEDUP = False
 try:
@@ -13,11 +19,21 @@ except Exception:
     pass
 
 
-def b(x):
+def b(x) -> bytes:
     return x.encode('latin-1') if not isinstance(x, bytes) else x
 
+def str_if_bytes(value)->str:
+    return (
+        value.decode('utf-8', errors='replace')
+        if isinstance(value, bytes)
+        else value
+    )
 
-def nativestr(x):
+def safe_str(value):
+    return str(str_if_bytes(value))
+
+
+def nativestr(x) -> str:
     return x if isinstance(x, str) else x.decode('utf-8', 'replace')
 
 
@@ -77,10 +93,23 @@ def int_or_none(response):
     return int(response)
 
 
-def pairs_to_dict(response):
-    """Creates a dict given a list of key/value pairs"""
-    it = iter(response)
-    return dict(zip(it, it))
+def pairs_to_dict(response, decode_keys=False, decode_string_values=False):
+    """Create a dict given a list of key/value pairs"""
+    if response is None:
+        return {}
+    if decode_keys or decode_string_values:
+        # the iter form is faster, but I don't know how to make that work
+        # with a str_if_bytes() map
+        keys = response[::2]
+        if decode_keys:
+            keys = map(str_if_bytes, keys)
+        values = response[1::2]
+        if decode_string_values:
+            values = map(str_if_bytes, values)
+        return dict(zip(keys, values))
+    else:
+        it = iter(response)
+        return dict(zip(it, it))
 
 
 # ++++++++++ result callbacks (cluster)++++++++++++++
@@ -191,14 +220,17 @@ if not _C_EXTENSION_SPEEDUP:
         0x6e17, 0x7e36, 0x4e55, 0x5e74, 0x2e93, 0x3eb2, 0x0ed1, 0x1ef0,
     ]
 
+
     def _crc16(data):
         crc = 0
         for byte in data:
             crc = ((crc << 8) & 0xff00) ^ x_mode_m_crc16_lookup[(
-                (crc >> 8) & 0xff) ^ byte]
+                                                                        (crc >> 8) & 0xff) ^ byte]
         return crc & 0xffff
 
+
     crc16 = _crc16
+
 
     def _hash_slot(key):
         start = key.find(b'{')
@@ -207,6 +239,7 @@ if not _C_EXTENSION_SPEEDUP:
             if end > -1 and end != start + 1:
                 key = key[start + 1:end]
         return crc16(key) % 16384
+
 
     hash_slot = _hash_slot
 
