@@ -31,6 +31,8 @@ from .commands.strings import ClusterStringsCommandMixin
 from .commands.strings import StringsCommandMixin
 from .commands.transaction import ClusterTransactionCommandMixin
 from .commands.transaction import TransactionCommandMixin
+from .commands.memory import MemoryCommandMixin
+from .commands.module import ModuleCommandMixin
 from .compat import CancelledError
 from .connection import RedisSSLContext
 from .connection import UnixDomainSocketConnection
@@ -58,7 +60,7 @@ mixins = [
     KeysCommandMixin, ListsCommandMixin, PubSubCommandMixin,
     ScriptingCommandMixin, SentinelCommandMixin, ServerCommandMixin,
     SetsCommandMixin, SortedSetCommandMixin, StringsCommandMixin,
-    TransactionCommandMixin, StreamsCommandMixin,
+    TransactionCommandMixin, StreamsCommandMixin, MemoryCommandMixin, ModuleCommandMixin
 ]
 
 cluster_mixins = [

@@ -30,6 +30,7 @@ class MemoryCommandMixin:
         'MEMORY PURGE': bool_ok,
         'MEMORY STATS': parse_memory_stats,
         'MEMORY USAGE': int_or_none,
+        # 'MEMORY HELP': pairs_to_dict
     }
 
     async def memory_doctor(self):
@@ -42,4 +43,27 @@ class MemoryCommandMixin:
     async def memory_help(self):
         return await self.execute_command('MEMORY HELP')
 
-    # todo MEMORY PURGE https://redis.io/commands/memory-purge
+    async def memory_malloc_stats(self):
+        return await self.execute_command('MEMORY MALLOC-STATS')
+
+    async def memory_purge(self):
+        return await self.execute_command('MEMORY PURGE')
+
+    async def memory_stats(self):
+        return await self.execute_command('MEMORY STATS')
+
+    async def memory_usage(self, key, samples=None):
+        """
+        Return the total memory usage for key, its value and associated
+        administrative overheads.
+
+        For nested data structures, ``samples`` is the number of elements to
+        sample. If left unspecified, the server's default is 5. Use 0 to sample
+        all elements.
+
+        For more information check https://redis.io/commands/memory-usage
+        """
+        args = []
+        if isinstance(samples, int):
+            args.extend([b'SAMPLES', samples])
+        return await self.execute_command('MEMORY USAGE', key, *args)
