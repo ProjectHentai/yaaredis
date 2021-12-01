@@ -9,8 +9,7 @@ from .exceptions import LockError
 from .exceptions import WatchError
 from .utils import b
 from .utils import dummy
-from .pipeline import BasePipeline
-from .typing import Number
+from .typing import Number, BasePipeline
 
 logger = logging.getLogger(__name__)
 

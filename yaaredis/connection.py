@@ -103,7 +103,7 @@ class Encoder:
         self.encoding_errors = encoding_errors
         self.decode_responses = decode_responses
 
-    def encode(self, value):
+    def encode(self, value) -> bytes:
         """Return a bytestring or bytes-like representation of the value"""
         if isinstance(value, (bytes, memoryview)):
             return value
@@ -255,7 +255,7 @@ class BaseParser:
         'WRONGPASS': AuthenticationFailureError,
         'NOAUTH': AuthenticationRequiredError,
         'NOPERM': NoPermissionError,
-    }  # todo port from redis-py 4.0
+    }
 
     def parse_error(self, response):
         """Parse an error response"""
@@ -479,8 +479,8 @@ class BaseConnection:
                  *, client_name=None, loop=None):
         self._parser = parser_class(reader_read_size)
         self._stream_timeout = stream_timeout
-        self._reader = None
-        self._writer = None
+        self._reader = None  # type: asyncio.StreamReader
+        self._writer = None  # type: asyncio.StreamWriter
         self.username = ''
         self.password = ''
         self.db = ''
@@ -705,12 +705,12 @@ class Connection(BaseConnection):
     def __init__(self, host='127.0.0.1', port=6379, username=None, password=None,
                  db=0, retry_on_timeout=False, stream_timeout=None, connect_timeout=None,
                  ssl_context=None, parser_class=DefaultParser, reader_read_size=65535,
-                 encoding='utf-8', decode_responses=False, socket_keepalive=None,
+                 encoding='utf-8', encoding_errors="strict", decode_responses=False, socket_keepalive=None,
                  socket_keepalive_options=None, *, client_name=None, loop=None):
         # pylint: disable=too-many-locals
         super().__init__(retry_on_timeout, stream_timeout,
                          parser_class, reader_read_size,
-                         encoding, decode_responses,
+                         encoding, encoding_errors, decode_responses,
                          client_name=client_name, loop=loop)
         self.host = host
         self.port = port

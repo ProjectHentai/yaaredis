@@ -1,9 +1,14 @@
 # -*- coding: utf-8 -*-
 import typing
-from typing import Union
+from typing import Union, TypeVar
 
-Number = Union[int, float]
-ByteOrStr = Union[str, bytes]
+Redis = TypeVar("Redis")
+RedisCluster = TypeVar("RedisCluster")
+BasePipeline = TypeVar("BasePipeline")
 
 if typing.TYPE_CHECKING:
     from .client import Redis, RedisCluster
+    from .pipeline import BasePipeline
+
+Number = Union[int, float]
+ByteOrStr = Union[str, bytes]

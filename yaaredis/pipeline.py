@@ -2,22 +2,21 @@ import inspect
 import sys
 from itertools import chain
 
-from .client import StrictRedis
-from .client import StrictRedisCluster
+from .client import StrictRedis, StrictRedisCluster
 from .compat import CancelledError
-from .exceptions import AskError
-from .exceptions import ClusterTransactionError
-from .exceptions import ConnectionError  # pylint: disable=redefined-builtin
-from .exceptions import ExecAbortError
-from .exceptions import MovedError
-from .exceptions import RedisClusterException
-from .exceptions import RedisError
-from .exceptions import ResponseError
-from .exceptions import TimeoutError  # pylint: disable=redefined-builtin
-from .exceptions import TryAgainError
-from .exceptions import WatchError
-from .utils import clusterdown_wrapper
-from .utils import dict_merge
+from .exceptions import (AskError,
+                         ClusterTransactionError,
+                         ConnectionError,
+                         ExecAbortError,
+                         MovedError,
+                         RedisClusterException,
+                         RedisError,
+                         ResponseError,
+                         TimeoutError,
+                         TryAgainError,
+                         WatchError)  # pylint: disable=redefined-builtin
+
+from .utils import clusterdown_wrapper, dict_merge
 
 ERRORS_ALLOW_RETRY = (ConnectionError, TimeoutError,
                       MovedError, AskError, TryAgainError)

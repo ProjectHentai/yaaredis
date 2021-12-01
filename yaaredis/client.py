@@ -2,55 +2,39 @@ import asyncio
 import sys
 
 from .commands.cluster import ClusterCommandMixin
-from .commands.connection import ClusterConnectionCommandMixin
-from .commands.connection import ConnectionCommandMixin
+from .commands.connection import ClusterConnectionCommandMixin, ConnectionCommandMixin
 from .commands.extra import ExtraCommandMixin
 from .commands.geo import GeoCommandMixin
-from .commands.hash import ClusterHashCommandMixin
-from .commands.hash import HashCommandMixin
-from .commands.hyperlog import ClusterHyperLogCommandMixin
-from .commands.hyperlog import HyperLogCommandMixin
-from .commands.keys import ClusterKeysCommandMixin
-from .commands.keys import KeysCommandMixin
-from .commands.lists import ClusterListsCommandMixin
-from .commands.lists import ListsCommandMixin
-from .commands.pubsub import CLusterPubSubCommandMixin
-from .commands.pubsub import PubSubCommandMixin
-from .commands.scripting import ClusterScriptingCommandMixin
-from .commands.scripting import ScriptingCommandMixin
-from .commands.sentinel import ClusterSentinelCommands
-from .commands.sentinel import SentinelCommandMixin
-from .commands.server import ClusterServerCommandMixin
-from .commands.server import ServerCommandMixin
-from .commands.sets import ClusterSetsCommandMixin
-from .commands.sets import SetsCommandMixin
+from .commands.hash import ClusterHashCommandMixin, HashCommandMixin
+from .commands.hyperlog import ClusterHyperLogCommandMixin, HyperLogCommandMixin
+from .commands.keys import ClusterKeysCommandMixin, KeysCommandMixin
+from .commands.lists import ClusterListsCommandMixin, ListsCommandMixin
+from .commands.pubsub import CLusterPubSubCommandMixin, PubSubCommandMixin
+from .commands.scripting import ClusterScriptingCommandMixin, ScriptingCommandMixin
+from .commands.sentinel import ClusterSentinelCommands, SentinelCommandMixin
+from .commands.server import ClusterServerCommandMixin, ServerCommandMixin
+from .commands.sets import ClusterSetsCommandMixin, SetsCommandMixin
 from .commands.sorted_set import ClusterSortedSetCommandMixin
 from .commands.sorted_set import SortedSetCommandMixin
 from .commands.streams import StreamsCommandMixin
-from .commands.strings import ClusterStringsCommandMixin
-from .commands.strings import StringsCommandMixin
-from .commands.transaction import ClusterTransactionCommandMixin
-from .commands.transaction import TransactionCommandMixin
+from .commands.strings import ClusterStringsCommandMixin, StringsCommandMixin
+from .commands.transaction import ClusterTransactionCommandMixin, TransactionCommandMixin
+from .commands.memory import MemoryCommandMixin
+from .commands.module import ModuleCommandMixin
 from .compat import CancelledError
-from .connection import RedisSSLContext
-from .connection import UnixDomainSocketConnection
-from .exceptions import AskError
-from .exceptions import BusyLoadingError
-from .exceptions import ClusterDownError
-from .exceptions import ClusterError
-from .exceptions import ClusterUnreachableError
-from .exceptions import ConnectionError  # pylint: disable=redefined-builtin
-from .exceptions import MovedError
-from .exceptions import RedisClusterException
-from .exceptions import TimeoutError  # pylint: disable=redefined-builtin
-from .exceptions import TryAgainError
-from .pool import ClusterConnectionPool
-from .pool import ConnectionPool
-from .utils import blocked_command
-from .utils import clusterdown_wrapper
-from .utils import dict_merge
-from .utils import first_key
-from .utils import NodeFlag
+from .connection import RedisSSLContext, UnixDomainSocketConnection
+from .exceptions import (AskError,
+                         BusyLoadingError,
+                         ClusterDownError,
+                         ClusterError,
+                         ClusterUnreachableError,
+                         ConnectionError,
+                         MovedError,
+                         RedisClusterException,
+                         TimeoutError,
+                         TryAgainError)  # pylint: disable=redefined-builtin
+from .pool import ClusterConnectionPool, ConnectionPool
+from .utils import blocked_command, clusterdown_wrapper, dict_merge, first_key, NodeFlag
 
 mixins = [
     ClusterCommandMixin, ConnectionCommandMixin, ExtraCommandMixin,
@@ -58,7 +42,7 @@ mixins = [
     KeysCommandMixin, ListsCommandMixin, PubSubCommandMixin,
     ScriptingCommandMixin, SentinelCommandMixin, ServerCommandMixin,
     SetsCommandMixin, SortedSetCommandMixin, StringsCommandMixin,
-    TransactionCommandMixin, StreamsCommandMixin,
+    TransactionCommandMixin, StreamsCommandMixin, MemoryCommandMixin, ModuleCommandMixin
 ]
 
 cluster_mixins = [
@@ -553,6 +537,7 @@ class StrictRedisCluster(StrictRedis, *cluster_mixins):
             transaction=transaction,
             watches=watches,
         )
+
 
 Redis = StrictRedis
 RedisCluster = StrictRedisCluster
