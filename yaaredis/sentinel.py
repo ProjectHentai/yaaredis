@@ -2,14 +2,11 @@ import os
 import random
 import weakref
 
-from .client import StrictRedis
-from .connection import Connection
-from .exceptions import ConnectionError  # pylint: disable=redefined-builtin
-from .exceptions import ReadOnlyError
-from .exceptions import ResponseError
-from .exceptions import TimeoutError  # pylint: disable=redefined-builtin
-from .pool import ConnectionPool
-from .utils import nativestr
+from yaaredis.client import StrictRedis
+from yaaredis.connection import Connection
+from yaaredis.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError  # pylint: disable=redefined-builtin
+from yaaredis.pool import ConnectionPool
+from yaaredis.utils import nativestr
 
 
 class MasterNotFoundError(ConnectionError):
@@ -124,7 +121,7 @@ class SentinelConnectionPool(ConnectionPool):
                 self.slave_rr_counter = random.randint(0, len(slaves) - 1)
             for _ in range(len(slaves)):
                 self.slave_rr_counter = (
-                    self.slave_rr_counter + 1) % len(slaves)
+                                                self.slave_rr_counter + 1) % len(slaves)
                 slave_address.append(slaves[self.slave_rr_counter])
             return slave_address
         # Fallback to the master connection

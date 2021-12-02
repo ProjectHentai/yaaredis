@@ -1,13 +1,10 @@
 import random
 import string
 
-from ..utils import bool_ok
-from ..utils import dict_merge
-from ..utils import string_keys_to_dict
+from yaaredis.utils import bool_ok, dict_merge, string_keys_to_dict
 
 
 class HyperLogCommandMixin:
-
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict('PFADD PFCOUNT', int),
         {

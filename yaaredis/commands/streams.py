@@ -1,8 +1,5 @@
-from ..exceptions import RedisError
-from ..utils import bool_ok
-from ..utils import dict_merge
-from ..utils import pairs_to_dict
-from ..utils import string_keys_to_dict
+from yaaredis.exceptions import RedisError
+from yaaredis.utils import bool_ok, dict_merge, pairs_to_dict, string_keys_to_dict
 
 
 def stream_list(response):

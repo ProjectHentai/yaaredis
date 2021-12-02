@@ -4,17 +4,11 @@ import random
 import threading
 import time
 from itertools import chain
-from urllib.parse import parse_qs
-from urllib.parse import unquote
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
-from .connection import ClusterConnection
-from .connection import Connection
-from .connection import RedisSSLContext
-from .connection import UnixDomainSocketConnection
-from .exceptions import ConnectionError  # pylint: disable=redefined-builtin
-from .exceptions import RedisClusterException
-from .nodemanager import NodeManager
+from yaaredis.connection import ClusterConnection, Connection, RedisSSLContext, UnixDomainSocketConnection
+from yaaredis.exceptions import ConnectionError, RedisClusterException  # pylint: disable=redefined-builtin
+from yaaredis.nodemanager import NodeManager
 
 FALSE_STRINGS = ('0', 'F', 'FALSE', 'N', 'NO')
 
@@ -40,6 +34,7 @@ URL_QUERY_ARGUMENT_PARSERS = {
 
 class ConnectionPool:
     """Generic connection pool"""
+
     # pylint: disable=too-many-instance-attributes
 
     @classmethod
@@ -644,7 +639,7 @@ class ClusterConnectionPool(ConnectionPool):
         return self.nodes.slots[slot][0]
 
     def get_node_by_slot(self, slot, command=None):
-        #prevent movederr exception, optimized read lookup speed
+        # prevent movederr exception, optimized read lookup speed
         if self.readonly and command in ["GET", "GETBIT", "HGETALL", "HMGET", "HLEN", "LLEN", "LINDEX", "MGET"]:
             return random.choice(self.nodes.slots[slot])
         return self.get_master_node_by_slot(slot)

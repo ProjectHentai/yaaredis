@@ -496,7 +496,7 @@ class BaseConnection:
         self.awaiting_response = False
         self.health_check_interval = health_check_interval  # todo this and retry
         self.next_health_check = 0
-        self.encoder = Encoder(encoding, encoding_errors, decode_responses)
+        self.encoder = Encoder(encoding, encoding_errors, decode_responses)  # type: Encoder
         self.last_active_at = time.time()
         self._buffer_cutoff = 6000
 

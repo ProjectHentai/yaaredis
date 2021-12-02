@@ -1,7 +1,6 @@
 from functools import wraps
 
-from .exceptions import ClusterDownError
-from .exceptions import RedisClusterException
+from yaaredis.exceptions import ClusterDownError, RedisClusterException
 
 try:
     import hiredis  # noqa
@@ -12,7 +11,7 @@ except ImportError:
 
 _C_EXTENSION_SPEEDUP = False
 try:
-    from .speedups import crc16, hash_slot  # pylint: disable=unused-import
+    from yaaredis.speedups import crc16, hash_slot  # pylint: disable=unused-import
 
     _C_EXTENSION_SPEEDUP = True
 except Exception:
@@ -22,12 +21,18 @@ except Exception:
 def b(x) -> bytes:
     return x.encode('latin-1') if not isinstance(x, bytes) else x
 
-def str_if_bytes(value)->str:
+
+def str_if_bytes(value) -> str:
     return (
         value.decode('utf-8', errors='replace')
         if isinstance(value, bytes)
         else value
     )
+
+
+def bool_ok(response):
+    return str_if_bytes(response) == 'OK'
+
 
 def safe_str(value):
     return str(str_if_bytes(value))

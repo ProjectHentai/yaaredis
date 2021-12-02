@@ -1,8 +1,8 @@
 import hashlib
 
-from .exceptions import NoScriptError
-from .pipeline import BasePipeline
-from .utils import b
+from yaaredis.exceptions import NoScriptError
+from yaaredis.pipeline import BasePipeline
+from yaaredis.utils import b
 
 
 class Script:

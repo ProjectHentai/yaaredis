@@ -1,8 +1,4 @@
-from ..utils import bool_ok
-from ..utils import dict_merge
-from ..utils import list_keys_to_dict
-from ..utils import nativestr
-from ..utils import NodeFlag
+from yaaredis.utils import bool_ok, dict_merge, list_keys_to_dict, nativestr, NodeFlag
 
 SENTINEL_STATE_TYPES = {
     'can-failover-its-master': int,

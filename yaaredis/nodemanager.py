@@ -1,10 +1,9 @@
 import random
 
-from .exceptions import ClusterUnreachableError
-from .exceptions import ConnectionError  # pylint: disable=redefined-builtin
-from .exceptions import RedisClusterException
-from .utils import b
-from .utils import hash_slot
+from yaaredis.exceptions import (ClusterUnreachableError,
+                         ConnectionError,
+                         RedisClusterException)  # pylint: disable=redefined-builtin
+from yaaredis.utils import b, hash_slot
 
 
 class NodeManager:
