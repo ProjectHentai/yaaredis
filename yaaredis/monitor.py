@@ -2,13 +2,12 @@ import re
 import asyncio
 
 from yaaredis.exceptions import RedisError
-from yaaredis.utils import str_if_bytes
+from yaaredis.utils import bool_ok
 from yaaredis.pool import ConnectionPool
 
 
 # todo add monitor like redis-py
-def bool_ok(response) -> str:
-    return str_if_bytes(response) == 'OK'
+
 
 
 class Monitor:

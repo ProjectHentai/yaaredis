@@ -30,6 +30,8 @@ def str_if_bytes(value) -> str:
         else value
     )
 
+def bool_ok(response):
+    return str_if_bytes(response) == 'OK'
 
 def safe_str(value):
     return str(str_if_bytes(value))
