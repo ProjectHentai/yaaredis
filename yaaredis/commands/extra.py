@@ -1,14 +1,9 @@
-from ..cache import Cache
-from ..cache import Compressor
-from ..cache import IdentityGenerator
-from ..cache import Serializer
-from ..exceptions import ResponseError
-from ..lock import Lock
-from ..lock import LuaLock
+from yaaredis.cache import Cache, Compressor, IdentityGenerator, Serializer
+from yaaredis.exceptions import ResponseError
+from yaaredis.lock import Lock, LuaLock
 
 
 class ExtraCommandMixin:
-
     RESPONSE_CALLBACKS = {}
 
     def cache(self, name, *args, cache_class=Cache,

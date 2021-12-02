@@ -1,10 +1,7 @@
-from ..utils import bool_ok
-from ..utils import nativestr
-from ..utils import NodeFlag
+from yaaredis.utils import bool_ok, nativestr, NodeFlag
 
 
 class ConnectionCommandMixin:
-
     RESPONSE_CALLBACKS = {
         'AUTH': bool,
         'PING': lambda r: nativestr(r) == 'PONG',
@@ -21,7 +18,6 @@ class ConnectionCommandMixin:
 
 
 class ClusterConnectionCommandMixin(ConnectionCommandMixin):
-
     NODES_FLAGS = {
         'PING': NodeFlag.ALL_NODES,
         'ECHO': NodeFlag.ALL_NODES,

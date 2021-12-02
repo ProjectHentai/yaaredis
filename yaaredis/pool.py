@@ -6,9 +6,9 @@ import time
 from itertools import chain
 from urllib.parse import parse_qs, unquote, urlparse
 
-from .connection import ClusterConnection, Connection, RedisSSLContext, UnixDomainSocketConnection
-from .exceptions import ConnectionError, RedisClusterException  # pylint: disable=redefined-builtin
-from .nodemanager import NodeManager
+from yaaredis.connection import ClusterConnection, Connection, RedisSSLContext, UnixDomainSocketConnection
+from yaaredis.exceptions import ConnectionError, RedisClusterException  # pylint: disable=redefined-builtin
+from yaaredis.nodemanager import NodeManager
 
 FALSE_STRINGS = ('0', 'F', 'FALSE', 'N', 'NO')
 

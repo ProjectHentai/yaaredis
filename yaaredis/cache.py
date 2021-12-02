@@ -8,10 +8,10 @@ try:
 except ImportError:
     import json
 
-from .utils import b
-from .exceptions import (SerializeError,
+from yaaredis.utils import b
+from yaaredis.exceptions import (SerializeError,
                          CompressError)
-from .typing import ByteOrStr, Number, Redis
+from yaaredis.typing import ByteOrStr, Number, Redis
 
 
 class IdentityGenerator:

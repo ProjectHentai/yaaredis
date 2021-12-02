@@ -1,6 +1,5 @@
-from ..exceptions import RedisError
-from ..utils import b
-from ..utils import nativestr
+from yaaredis.exceptions import RedisError
+from yaaredis.utils import b, nativestr
 
 
 def parse_georadius_generic(response, **options):
@@ -35,11 +34,10 @@ def parse_georadius_generic(response, **options):
 
 
 class GeoCommandMixin:
-
     RESPONSE_CALLBACKS = {
         'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
                                                  float(ll[1]))
-                                     if ll is not None else None, r)),
+        if ll is not None else None, r)),
         'GEOHASH': list,
         'GEORADIUS': parse_georadius_generic,
         'GEORADIUSBYMEMBER': parse_georadius_generic,

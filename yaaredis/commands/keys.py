@@ -1,18 +1,16 @@
 import datetime
 import time as mod_time
 
-from ..exceptions import DataError
-from ..exceptions import RedisError
-from ..exceptions import ResponseError
-from ..utils import b
-from ..utils import bool_ok
-from ..utils import dict_merge
-from ..utils import first_key
-from ..utils import int_or_none
-from ..utils import list_keys_to_dict
-from ..utils import merge_result
-from ..utils import NodeFlag
-from ..utils import string_keys_to_dict
+from yaaredis.exceptions import DataError, RedisError, ResponseError
+from yaaredis.utils import (b,
+                            bool_ok,
+                            dict_merge,
+                            first_key,
+                            int_or_none,
+                            list_keys_to_dict,
+                            merge_result,
+                            NodeFlag,
+                            string_keys_to_dict)
 
 
 def sort_return_tuples(response, **options):
@@ -274,7 +272,6 @@ class KeysCommandMixin:
 
 
 class ClusterKeysCommandMixin(KeysCommandMixin):
-
     NODES_FLAGS = dict_merge(
         {
             'MOVE': NodeFlag.BLOCKED,

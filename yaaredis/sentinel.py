@@ -2,11 +2,11 @@ import os
 import random
 import weakref
 
-from .client import StrictRedis
-from .connection import Connection
-from .exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError  # pylint: disable=redefined-builtin
-from .pool import ConnectionPool
-from .utils import nativestr
+from yaaredis.client import StrictRedis
+from yaaredis.connection import Connection
+from yaaredis.exceptions import ConnectionError, ReadOnlyError, ResponseError, TimeoutError  # pylint: disable=redefined-builtin
+from yaaredis.pool import ConnectionPool
+from yaaredis.utils import nativestr
 
 
 class MasterNotFoundError(ConnectionError):

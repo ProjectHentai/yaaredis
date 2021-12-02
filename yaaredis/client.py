@@ -1,42 +1,42 @@
 import asyncio
 import sys
 
-from .commands.cluster import ClusterCommandMixin
-from .commands.connection import ClusterConnectionCommandMixin, ConnectionCommandMixin
-from .commands.extra import ExtraCommandMixin
-from .commands.geo import GeoCommandMixin
-from .commands.hash import ClusterHashCommandMixin, HashCommandMixin
-from .commands.hyperlog import ClusterHyperLogCommandMixin, HyperLogCommandMixin
-from .commands.keys import ClusterKeysCommandMixin, KeysCommandMixin
-from .commands.lists import ClusterListsCommandMixin, ListsCommandMixin
-from .commands.pubsub import CLusterPubSubCommandMixin, PubSubCommandMixin
-from .commands.scripting import ClusterScriptingCommandMixin, ScriptingCommandMixin
-from .commands.sentinel import ClusterSentinelCommands, SentinelCommandMixin
-from .commands.server import ClusterServerCommandMixin, ServerCommandMixin
-from .commands.sets import ClusterSetsCommandMixin, SetsCommandMixin
-from .commands.sorted_set import ClusterSortedSetCommandMixin
-from .commands.sorted_set import SortedSetCommandMixin
-from .commands.streams import StreamsCommandMixin
-from .commands.strings import ClusterStringsCommandMixin, StringsCommandMixin
-from .commands.transaction import ClusterTransactionCommandMixin, TransactionCommandMixin
-from .commands.memory import MemoryCommandMixin
-from .commands.module import ModuleCommandMixin
-from .commands.monitor import MonitorCommandMixin
-from .commands.acl import ACLCommandMixin
-from .compat import CancelledError
-from .connection import RedisSSLContext, UnixDomainSocketConnection
-from .exceptions import (AskError,
-                         BusyLoadingError,
-                         ClusterDownError,
-                         ClusterError,
-                         ClusterUnreachableError,
-                         ConnectionError,
-                         MovedError,
-                         RedisClusterException,
-                         TimeoutError,
-                         TryAgainError)  # pylint: disable=redefined-builtin
-from .pool import ClusterConnectionPool, ConnectionPool
-from .utils import blocked_command, clusterdown_wrapper, dict_merge, first_key, NodeFlag
+from yaaredis.commands.cluster import ClusterCommandMixin
+from yaaredis.commands.connection import ClusterConnectionCommandMixin, ConnectionCommandMixin
+from yaaredis.commands.extra import ExtraCommandMixin
+from yaaredis.commands.geo import GeoCommandMixin
+from yaaredis.commands.hash import ClusterHashCommandMixin, HashCommandMixin
+from yaaredis.commands.hyperlog import ClusterHyperLogCommandMixin, HyperLogCommandMixin
+from yaaredis.commands.keys import ClusterKeysCommandMixin, KeysCommandMixin
+from yaaredis.commands.lists import ClusterListsCommandMixin, ListsCommandMixin
+from yaaredis.commands.pubsub import CLusterPubSubCommandMixin, PubSubCommandMixin
+from yaaredis.commands.scripting import ClusterScriptingCommandMixin, ScriptingCommandMixin
+from yaaredis.commands.sentinel import ClusterSentinelCommands, SentinelCommandMixin
+from yaaredis.commands.server import ClusterServerCommandMixin, ServerCommandMixin
+from yaaredis.commands.sets import ClusterSetsCommandMixin, SetsCommandMixin
+from yaaredis.commands.sorted_set import ClusterSortedSetCommandMixin
+from yaaredis.commands.sorted_set import SortedSetCommandMixin
+from yaaredis.commands.streams import StreamsCommandMixin
+from yaaredis.commands.strings import ClusterStringsCommandMixin, StringsCommandMixin
+from yaaredis.commands.transaction import ClusterTransactionCommandMixin, TransactionCommandMixin
+from yaaredis.commands.memory import MemoryCommandMixin
+from yaaredis.commands.module import ModuleCommandMixin
+from yaaredis.commands.monitor import MonitorCommandMixin
+from yaaredis.commands.acl import ACLCommandMixin
+from yaaredis.compat import CancelledError
+from yaaredis.connection import RedisSSLContext, UnixDomainSocketConnection
+from yaaredis.exceptions import (AskError,
+                                 BusyLoadingError,
+                                 ClusterDownError,
+                                 ClusterError,
+                                 ClusterUnreachableError,
+                                 ConnectionError,
+                                 MovedError,
+                                 RedisClusterException,
+                                 TimeoutError,
+                                 TryAgainError)  # pylint: disable=redefined-builtin
+from yaaredis.pool import ClusterConnectionPool, ConnectionPool
+from yaaredis.utils import blocked_command, clusterdown_wrapper, dict_merge, first_key, NodeFlag
 
 mixins = [
     ClusterCommandMixin, ConnectionCommandMixin, ExtraCommandMixin,

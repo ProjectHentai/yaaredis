@@ -1,9 +1,9 @@
 import asyncio
 import threading
 
-from .compat import CancelledError
-from .exceptions import ConnectionError, PubSubError, TimeoutError  # pylint: disable=redefined-builtin
-from .utils import list_or_args, nativestr
+from yaaredis.compat import CancelledError
+from yaaredis.exceptions import ConnectionError, PubSubError, TimeoutError  # pylint: disable=redefined-builtin
+from yaaredis.utils import list_or_args, nativestr
 
 SENTINEL = object()
 

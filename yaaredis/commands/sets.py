@@ -1,8 +1,4 @@
-from ..utils import b
-from ..utils import dict_merge
-from ..utils import first_key
-from ..utils import list_or_args
-from ..utils import string_keys_to_dict
+from yaaredis.utils import b, dict_merge, first_key, list_or_args, string_keys_to_dict
 
 
 def parse_sscan(response, **_options):
@@ -11,7 +7,6 @@ def parse_sscan(response, **_options):
 
 
 class SetsCommandMixin:
-
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
             'SADD SCARD SDIFFSTORE '
@@ -135,7 +130,6 @@ class SetsCommandMixin:
 
 
 class ClusterSetsCommandMixin(SetsCommandMixin):
-
     RESULT_CALLBACKS = {
         'SSCAN': first_key,
     }

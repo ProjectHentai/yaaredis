@@ -1,14 +1,14 @@
 import datetime
 
-from ..exceptions import RedisError
-from ..utils import b
-from ..utils import bool_ok
-from ..utils import dict_merge
-from ..utils import list_keys_to_dict
-from ..utils import nativestr
-from ..utils import NodeFlag
-from ..utils import pairs_to_dict
-from ..utils import string_keys_to_dict
+from yaaredis.exceptions import RedisError
+from yaaredis.utils import (b,
+                            bool_ok,
+                            dict_merge,
+                            list_keys_to_dict,
+                            nativestr,
+                            NodeFlag,
+                            pairs_to_dict,
+                            string_keys_to_dict)
 
 
 def parse_slowlog_get(response, **_options):
@@ -130,6 +130,7 @@ def parse_role(response):
             'role': role,
             'masters': response[1:],
         }
+
     parser = {
         'master': _parse_master,
         'slave': _parse_slave,

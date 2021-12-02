@@ -4,12 +4,10 @@ import logging
 import time as mod_time
 import uuid
 
-from .connection import ClusterConnection
-from .exceptions import LockError
-from .exceptions import WatchError
-from .utils import b
-from .utils import dummy
-from .typing import Number, BasePipeline
+from yaaredis.connection import ClusterConnection
+from yaaredis.exceptions import LockError, WatchError
+from yaaredis.utils import b, dummy
+from yaaredis.typing import Number, BasePipeline
 
 logger = logging.getLogger(__name__)
 
