@@ -22,12 +22,14 @@ except Exception:
 def b(x) -> bytes:
     return x.encode('latin-1') if not isinstance(x, bytes) else x
 
-def str_if_bytes(value)->str:
+
+def str_if_bytes(value) -> str:
     return (
         value.decode('utf-8', errors='replace')
         if isinstance(value, bytes)
         else value
     )
+
 
 def safe_str(value):
     return str(str_if_bytes(value))
