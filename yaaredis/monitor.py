@@ -9,7 +9,6 @@ from yaaredis.pool import ConnectionPool
 # todo add monitor like redis-py
 
 
-
 class Monitor:
     """
     Monitor is useful for handling the MONITOR command to the redis server.
@@ -82,6 +81,4 @@ class Monitor:
         while True:
             yield await self.next_command()
 
-    async def __aiter__(self):
-        while True:
-            yield await self.next_command()
+    __aiter__ = listen
