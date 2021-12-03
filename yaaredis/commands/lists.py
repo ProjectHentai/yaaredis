@@ -1,9 +1,10 @@
 from yaaredis.exceptions import DataError, RedisClusterException, RedisError
-from yaaredis.utils import b, bool_ok, dict_merge, nativestr, string_keys_to_dict
+from yaaredis.utils import b, bool_ok, dict_merge, nativestr, string_keys_to_dict, str_if_bytes
 
 
 class ListsCommandMixin:
     RESPONSE_CALLBACKS = dict_merge(
+        string_keys_to_dict("LMOVE BLMOVE", str_if_bytes),
         string_keys_to_dict(
             'BLPOP BRPOP',
             lambda r: r and tuple(r) or None,
@@ -16,6 +17,27 @@ class ListsCommandMixin:
         string_keys_to_dict('LSET LTRIM', bool_ok),
         string_keys_to_dict('LINSERT LLEN LPUSHX RPUSHX', int),
     )
+
+    async def lmove(self, first_list, second_list, src="LEFT", dest="RIGHT"):
+        """
+        Atomically returns and removes the first/last element of a list,
+        pushing it as the first/last element on the destination list.
+        Returns the element being popped and pushed.
+
+        For more information check https://redis.io/commands/lmov
+        """
+        params = [first_list, second_list, src, dest]
+        return await self.execute_command("LMOVE", *params)
+
+    async def blmove(self, first_list, second_list, timeout,
+                     src="LEFT", dest="RIGHT"):
+        """
+        Blocking version of lmove.
+
+        For more information check https://redis.io/commands/blmove
+        """
+        params = [first_list, second_list, src, dest, timeout]
+        return await self.execute_command("BLMOVE", *params)
 
     async def blpop(self, keys, timeout=0):
         """
@@ -93,9 +115,20 @@ class ListsCommandMixin:
         """Returns the length of the list ``name``"""
         return await self.execute_command('LLEN', name)
 
-    async def lpop(self, name):
-        """RemoveS and returns the first item of the list ``name``"""
-        return await self.execute_command('LPOP', name)
+    async def lpop(self, name, count=None):
+        """
+        Removes and returns the first elements of the list ``name``.
+
+        By default, the command pops a single element from the beginning of
+        the list. When provided with the optional ``count`` argument, the reply
+        will consist of up to count elements, depending on the list's length.
+
+        For more information check https://redis.io/commands/lpop
+        """
+        if count is not None:
+            return await self.execute_command('LPOP', name, count)
+        else:
+            return await self.execute_command('LPOP', name)
 
     async def lpush(self, name, *values):
         """Pushes ``values`` onto the head of the list ``name``"""
@@ -163,6 +196,44 @@ class ListsCommandMixin:
         Pushes ``value`` onto the tail of the list ``name`` if ``name`` exists
         """
         return await self.execute_command('RPUSHX', name, value)
+
+    async def lpos(self, name, value, rank=None, count=None, maxlen=None):
+        """
+        Get position of ``value`` within the list ``name``
+
+         If specified, ``rank`` indicates the "rank" of the first element to
+         return in case there are multiple copies of ``value`` in the list.
+         By default, LPOS returns the position of the first occurrence of
+         ``value`` in the list. When ``rank`` 2, LPOS returns the position of
+         the second ``value`` in the list. If ``rank`` is negative, LPOS
+         searches the list in reverse. For example, -1 would return the
+         position of the last occurrence of ``value`` and -2 would return the
+         position of the next to last occurrence of ``value``.
+
+         If specified, ``count`` indicates that LPOS should return a list of
+         up to ``count`` positions. A ``count`` of 2 would return a list of
+         up to 2 positions. A ``count`` of 0 returns a list of all positions
+         matching ``value``. When ``count`` is specified and but ``value``
+         does not exist in the list, an empty list is returned.
+
+         If specified, ``maxlen`` indicates the maximum number of list
+         elements to scan. A ``maxlen`` of 1000 will only return the
+         position(s) of items within the first 1000 entries in the list.
+         A ``maxlen`` of 0 (the default) will scan the entire list.
+
+         For more information check https://redis.io/commands/lpos
+        """
+        pieces = [name, value]
+        if rank is not None:
+            pieces.extend(['RANK', rank])
+
+        if count is not None:
+            pieces.extend(['COUNT', count])
+
+        if maxlen is not None:
+            pieces.extend(['MAXLEN', maxlen])
+
+        return await self.execute_command('LPOS', *pieces)
 
 
 class ClusterListsCommandMixin(ListsCommandMixin):

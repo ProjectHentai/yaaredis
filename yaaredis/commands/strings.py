@@ -1,9 +1,38 @@
 # pylint: disable=redefined-builtin
 import datetime
+import time
 from collections import defaultdict
 
 from yaaredis.exceptions import RedisError
-from yaaredis.utils import bool_ok, dict_merge, list_or_args, nativestr, NodeFlag, string_keys_to_dict
+from yaaredis.utils import bool_ok, dict_merge, list_or_args, nativestr, NodeFlag, string_keys_to_dict, str_if_bytes
+
+
+def parse_stralgo(response, **options):
+    """
+    Parse the response from `STRALGO` command.
+    Without modifiers the returned value is string.
+    When LEN is given the command returns the length of the result
+    (i.e integer).
+    When IDX is given the command returns a dictionary with the LCS
+    length and all the ranges in both the strings, start and end
+    offset for each string, where there are matches.
+    When WITHMATCHLEN is given, each array representing a match will
+    also have the length of the match at the beginning of the array.
+    """
+    if options.get('len', False):
+        return int(response)
+    if options.get('idx', False):
+        if options.get('withmatchlen', False):
+            matches = [[(int(match[-1]))] + list(map(tuple, match[:-1]))
+                       for match in response[1]]
+        else:
+            matches = [list(map(tuple, match))
+                       for match in response[1]]
+        return {
+            str_if_bytes(response[0]): matches,
+            str_if_bytes(response[2]): int(response[3])
+        }
+    return str_if_bytes(response)
 
 
 class BitField:
@@ -77,6 +106,7 @@ class StringsCommandMixin:
             'INCRBYFLOAT': float,
             'MSET': bool_ok,
             'SET': lambda r: r and nativestr(r) == 'OK',
+            'STRALGO': parse_stralgo,
         },
     )
 
@@ -145,6 +175,64 @@ class StringsCommandMixin:
         Return the value at key ``name``, or None if the key doesn't exist
         """
         return await self.execute_command('GET', name)
+
+    async def getex(self, name,
+                    ex=None, px=None, exat=None, pxat=None, persist=False):
+        """
+        Get the value of key and optionally set its expiration.
+        GETEX is similar to GET, but is a write command with
+        additional options. All time parameters can be given as
+        datetime.timedelta or integers.
+
+        ``ex`` sets an expire flag on key ``name`` for ``ex`` seconds.
+
+        ``px`` sets an expire flag on key ``name`` for ``px`` milliseconds.
+
+        ``exat`` sets an expire flag on key ``name`` for ``ex`` seconds,
+        specified in unix time.
+
+        ``pxat`` sets an expire flag on key ``name`` for ``ex`` milliseconds,
+        specified in unix time.
+
+        ``persist`` remove the time to live associated with ``name``.
+
+        For more information check https://redis.io/commands/getex
+        """
+
+        opset = set([ex, px, exat, pxat])
+        if len(opset) > 2 or len(opset) > 1 and persist:
+            raise DataError("``ex``, ``px``, ``exat``, ``pxat``, "
+                            "and ``persist`` are mutually exclusive.")
+
+        pieces = []
+        # similar to set command
+        if ex is not None:
+            pieces.append('EX')
+            if isinstance(ex, datetime.timedelta):
+                ex = int(ex.total_seconds())
+            pieces.append(ex)
+        if px is not None:
+            pieces.append('PX')
+            if isinstance(px, datetime.timedelta):
+                px = int(px.total_seconds() * 1000)
+            pieces.append(px)
+        # similar to pexpireat command
+        if exat is not None:
+            pieces.append('EXAT')
+            if isinstance(exat, datetime.datetime):
+                s = int(exat.microsecond / 1000000)
+                exat = int(time.mktime(exat.timetuple())) + s
+            pieces.append(exat)
+        if pxat is not None:
+            pieces.append('PXAT')
+            if isinstance(pxat, datetime.datetime):
+                ms = int(pxat.microsecond / 1000)
+                pxat = int(time.mktime(pxat.timetuple())) * 1000 + ms
+            pieces.append(pxat)
+        if persist:
+            pieces.append('PERSIST')
+
+        return await self.execute_command('GETEX', name, *pieces)
 
     async def getbit(self, name, offset):
         'Returns a boolean indicating the value of ``offset`` in ``name``'
@@ -324,6 +412,55 @@ class StringsCommandMixin:
         Returns the length of the new string.
         """
         return await self.execute_command('SETRANGE', name, offset, value)
+
+    async def stralgo(self, algo, value1, value2, specific_argument='strings',
+                      len=False, idx=False, minmatchlen=None, withmatchlen=False):
+        """
+        Implements complex algorithms that operate on strings.
+        Right now the only algorithm implemented is the LCS algorithm
+        (longest common substring). However new algorithms could be
+        implemented in the future.
+
+        ``algo`` Right now must be LCS
+        ``value1`` and ``value2`` Can be two strings or two keys
+        ``specific_argument`` Specifying if the arguments to the algorithm
+        will be keys or strings. strings is the default.
+        ``len`` Returns just the len of the match.
+        ``idx`` Returns the match positions in each string.
+        ``minmatchlen`` Restrict the list of matches to the ones of a given
+        minimal length. Can be provided only when ``idx`` set to True.
+        ``withmatchlen`` Returns the matches with the len of the match.
+        Can be provided only when ``idx`` set to True.
+
+        For more information check https://redis.io/commands/stralgo
+        """
+        # check validity
+        supported_algo = ['LCS']
+        if algo not in supported_algo:
+            raise DataError("The supported algorithms are: %s"
+                            % (', '.join(supported_algo)))
+        if specific_argument not in ['keys', 'strings']:
+            raise DataError("specific_argument can be only"
+                            " keys or strings")
+        if len and idx:
+            raise DataError("len and idx cannot be provided together.")
+
+        pieces = [algo, specific_argument.upper(), value1, value2]
+        if len:
+            pieces.append(b'LEN')
+        if idx:
+            pieces.append(b'IDX')
+        try:
+            int(minmatchlen)
+            pieces.extend([b'MINMATCHLEN', minmatchlen])
+        except TypeError:
+            pass
+        if withmatchlen:
+            pieces.append(b'WITHMATCHLEN')
+
+        return await self.execute_command('STRALGO', *pieces, len=len, idx=idx,
+                                          minmatchlen=minmatchlen,
+                                          withmatchlen=withmatchlen)
 
     async def strlen(self, name):
         """Returns the number of bytes stored in the value of ``name``"""

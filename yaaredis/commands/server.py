@@ -1,6 +1,6 @@
 import datetime
 
-from yaaredis.exceptions import RedisError
+from yaaredis.exceptions import RedisError, DataError
 from yaaredis.utils import (b,
                             bool_ok,
                             dict_merge,
@@ -8,7 +8,8 @@ from yaaredis.utils import (b,
                             nativestr,
                             NodeFlag,
                             pairs_to_dict,
-                            string_keys_to_dict)
+                            string_keys_to_dict,
+                            str_if_bytes)
 
 
 def parse_slowlog_get(response, **_options):
@@ -20,12 +21,31 @@ def parse_slowlog_get(response, **_options):
     } for item in response]
 
 
-def parse_client_list(response, **_options):
+def parse_client_list(response, **options):
     clients = []
-    for c in nativestr(response).splitlines():
+    for c in str_if_bytes(response).splitlines():
         # Values might contain '='
-        clients.append(dict([pair.split('=', 1) for pair in c.split(' ')]))
+        clients.append(dict(pair.split('=', 1) for pair in c.split(' ')))
     return clients
+
+
+def parse_client_info(value):
+    """
+    Parsing client-info in ACL Log in following format.
+    "key1=value1 key2=value2 key3=value3"
+    """
+    client_info = {}
+    infos = str_if_bytes(value).split(" ")
+    for info in infos:
+        key, value = info.split("=")
+        client_info[key] = value
+
+    # Those fields are defined as int in networking.c
+    for int_key in {"id", "age", "idle", "db", "sub", "psub",
+                    "multi", "qbuf", "qbuf-free", "obl",
+                    "argv-mem", "oll", "omem", "tot-mem"}:
+        client_info[int_key] = int(client_info[int_key])
+    return client_info
 
 
 def parse_config_get(response, **_options):
@@ -45,14 +65,12 @@ def timestamp_to_datetime(response):
 
 
 def parse_debug_object(response):
-    """
-    Parses the results of Redis's DEBUG OBJECT command into a Python dict
-    """
+    """Parse the results of Redis's DEBUG OBJECT command into a Python dict"""
     # The 'type' of the object is the first item in the response, but isn't
     # prefixed with a name
-    response = nativestr(response)
+    response = str_if_bytes(response)
     response = 'type:' + response
-    response = dict([kv.split(':') for kv in response.split()])
+    response = dict(kv.split(':') for kv in response.split())
 
     # parse some expected int values from the string response
     # note: this cmd isn't spec'd so these may not appear in all redis versions
@@ -139,6 +157,12 @@ def parse_role(response):
     return parser(response)
 
 
+def parse_client_kill(response, **options):
+    if isinstance(response, int):
+        return response
+    return str_if_bytes(response) == 'OK'
+
+
 class ServerCommandMixin:
     # pylint: disable=too-many-public-methods
     RESPONSE_CALLBACKS = dict_merge(
@@ -152,11 +176,15 @@ class ServerCommandMixin:
             'SLOWLOG GET': parse_slowlog_get,
             'SLOWLOG LEN': int,
             'SLOWLOG RESET': bool_ok,
-            'CLIENT GETNAME': lambda r: r and nativestr(r),
-            'CLIENT KILL': bool_ok,
+            'CLIENT ID': int,
+            'CLIENT KILL': parse_client_kill,
             'CLIENT LIST': parse_client_list,
+            'CLIENT INFO': parse_client_info,
             'CLIENT SETNAME': bool_ok,
+            'CLIENT UNBLOCK': lambda r: r and int(r) == 1 or False,
             'CLIENT PAUSE': bool_ok,
+            'CLIENT GETREDIR': int,
+            'CLIENT TRACKINGINFO': lambda r: list(map(str_if_bytes, r)),
             'CONFIG GET': parse_config_get,
             'CONFIG RESETSTAT': bool_ok,
             'CONFIG SET': bool_ok,
@@ -182,6 +210,15 @@ class ServerCommandMixin:
         """Disconnects the client at ``address`` (ip:port)"""
         return await self.execute_command('CLIENT KILL', address)
 
+    async def client_info(self):
+        """
+        Returns information and statistics about the current
+        client connection.
+
+        For more information check https://redis.io/commands/client-info
+        """
+        return await self.execute_command('CLIENT INFO')
+
     async def client_list(self):
         """Returns a list of currently connected clients"""
         return await self.execute_command('CLIENT LIST')
@@ -194,12 +231,85 @@ class ServerCommandMixin:
         """Sets the current connection name"""
         return await self.execute_command('CLIENT SETNAME', name)
 
+    async def client_unblock(self, client_id, error=False):
+        """
+        Unblocks a connection by its client id.
+        If ``error`` is True, unblocks the client with a special error message.
+        If ``error`` is False (default), the client is unblocked using the
+        regular timeout mechanism.
+
+        For more information check https://redis.io/commands/client-unblock
+        """
+        args = ['CLIENT UNBLOCK', int(client_id)]
+        if error:
+            args.append(b'ERROR')
+        return await self.execute_command(*args)
+
+    async def client_getredir(self):
+        """
+        Returns the ID (an integer) of the client to whom we are
+        redirecting tracking notifications.
+
+        see: https://redis.io/commands/client-getredir
+        """
+        return await self.execute_command('CLIENT GETREDIR')
+
+    async def client_reply(self, reply):
+        """
+        Enable and disable redis server replies.
+        ``reply`` Must be ON OFF or SKIP,
+            ON - The default most with server replies to commands
+            OFF - Disable server responses to commands
+            SKIP - Skip the response of the immediately following command.
+
+        Note: When setting OFF or SKIP replies, you will need a client object
+        with a timeout specified in seconds, and will need to catch the
+        TimeoutError.
+              The test_client_reply unit test illustrates this, and
+              conftest.py has a client with a timeout.
+
+        See https://redis.io/commands/client-reply
+        """
+        replies = ['ON', 'OFF', 'SKIP']
+        if reply not in replies:
+            raise DataError('CLIENT REPLY must be one of %r' % replies)
+        return await self.execute_command("CLIENT REPLY", reply)
+
+    async def client_id(self):
+        """
+        Returns the current connection id
+
+        For more information check https://redis.io/commands/client-id
+        """
+        return await self.execute_command('CLIENT ID')
+
+    async def client_trackinginfo(self):
+        """
+        Returns the information about the current client connection's
+        use of the server assisted client side cache.
+
+        See https://redis.io/commands/client-trackinginfo
+        """
+        return await self.execute_command('CLIENT TRACKINGINFO')
+
     async def client_pause(self, timeout=0):
         """
-        Suspends all the Redis clients for the specified amount of time
-        (in milliseconds).
+        Suspend all the Redis clients for the specified amount of time
+        :param timeout: milliseconds to pause clients
+
+        For more information check https://redis.io/commands/client-pause
         """
+        if not isinstance(timeout, int):
+            raise DataError("CLIENT PAUSE timeout must be an integer")
         return await self.execute_command('CLIENT PAUSE', timeout)
+
+    async def client_unpause(self):
+        """
+        Unpause all redis clients
+
+        For more information check https://redis.io/commands/client-unpause
+        """
+        return await self.execute_command('CLIENT UNPAUSE')
 
     async def config_get(self, pattern='*'):
         """Returns a dictionary of configuration based on the ``pattern``"""
@@ -227,13 +337,26 @@ class ServerCommandMixin:
         """Returns version specific meta information about a given key"""
         return await self.execute_command('DEBUG OBJECT', key)
 
+    async def debug_segfault(self):
+        return await self.execute_command('DEBUG SEGFAULT')
+
     async def flushall(self):
         """Deletes all keys in all databases on the current host"""
         return await self.execute_command('FLUSHALL')
 
-    async def flushdb(self):
-        """Deletes all keys in the current database"""
-        return await self.execute_command('FLUSHDB')
+    async def flushdb(self, asynchronous=False):
+        """
+        Delete all keys in the current database.
+
+        ``asynchronous`` indicates whether the operation is
+        executed asynchronously by the server.
+
+        For more information check https://redis.io/commands/flushdb
+        """
+        args = []
+        if asynchronous:
+            args.append(b'ASYNC')
+        return await self.execute_command('FLUSHDB', *args)
 
     async def info(self, section=None):
         """
@@ -317,6 +440,17 @@ class ServerCommandMixin:
         :return:
         """
         return await self.execute_command('ROLE')
+
+    async def lolwut(self, *version_numbers):
+        """
+        Get the Redis version and a piece of generative computer art
+
+        See: https://redis.io/commands/lolwut
+        """
+        if version_numbers:
+            return await self.execute_command('LOLWUT VERSION', *version_numbers)
+        else:
+            return await self.execute_command('LOLWUT')
 
 
 class ClusterServerCommandMixin(ServerCommandMixin):

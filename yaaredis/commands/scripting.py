@@ -1,3 +1,4 @@
+from yaaredis.exceptions import DataError
 from yaaredis.utils import bool_ok, dict_merge, list_keys_to_dict, nativestr, NodeFlag
 
 
@@ -32,6 +33,9 @@ class ScriptingCommandMixin:
         """
         return await self.execute_command('EVALSHA', sha, numkeys, *keys_and_args)
 
+    async def script_debug(self, arg):
+        return await self.execute_command('SCRIPT DEBUG', arg) # todo danger
+
     async def script_exists(self, *args):
         """
         Check if a script exists in the script cache by specifying the SHAs of
@@ -40,9 +44,23 @@ class ScriptingCommandMixin:
         """
         return await self.execute_command('SCRIPT EXISTS', *args)
 
-    async def script_flush(self):
-        """Flushes all scripts from the script cache"""
-        return await self.execute_command('SCRIPT FLUSH')
+    async def script_flush(self, sync_type=None):
+        """Flush all scripts from the script cache.
+        ``sync_type`` is by default SYNC (synchronous) but it can also be
+                      ASYNC.
+        For more information check  https://redis.io/commands/script-flush
+        """
+
+        # Redis pre 6 had no sync_type.
+        if sync_type not in ["SYNC", "ASYNC", None]:
+            raise DataError("SCRIPT FLUSH defaults to SYNC in redis > 6.2, or "
+                            "accepts SYNC/ASYNC. For older versions, "
+                            "of redis leave as None.")
+        if sync_type is None:
+            pieces = []
+        else:
+            pieces = [sync_type]
+        return await self.execute_command('SCRIPT FLUSH', *pieces)
 
     async def script_kill(self):
         """Kills the currently executing Lua script"""

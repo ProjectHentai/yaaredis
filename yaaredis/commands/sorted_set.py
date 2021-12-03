@@ -1,7 +1,8 @@
 # pylint: disable=redefined-builtin
-from yaaredis.exceptions import RedisError
-from yaaredis.utils import b, dict_merge, first_key, int_or_none, string_keys_to_dict
+from yaaredis.exceptions import RedisError, DataError
+from yaaredis.utils import b, dict_merge, first_key, int_or_none, string_keys_to_dict, list_or_args
 
+# todo need functions and check callbacs
 VALID_ZADD_OPTIONS = {'NX', 'XX', 'CH', 'INCR'}
 
 
@@ -16,11 +17,19 @@ def zset_score_pairs(response, **options):
     If ``withscores`` is specified in the options, return the response as
     a list of (value, score) pairs
     """
-    if not response or not options['withscores']:
+    if not response or not options.get('withscores'):
         return response
     score_cast_func = options.get('score_cast_func', float)
     it = iter(response)
     return list(zip(it, map(score_cast_func, it)))
+
+
+def parse_zadd(response, **options):
+    if response is None:
+        return None
+    if options.get('as_score'):
+        return float(response)
+    return int(response)
 
 
 def parse_zscan(response, **options):
@@ -30,25 +39,34 @@ def parse_zscan(response, **options):
     return int(cursor), list(zip(it, map(score_cast_func, it)))
 
 
+def parse_zmscore(response, **options):
+    # zmscore: list of scores (double precision floating point number) or nil
+    return [float(score) if score is not None else None for score in response]
+
+
 class SortedSetCommandMixin:
     # pylint: disable=too-many-public-methods
 
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
-            'ZADD ZCARD ZLEXCOUNT '
+            'ZCARD ZLEXCOUNT '
             'ZREM ZREMRANGEBYLEX '
             'ZREMRANGEBYRANK '
             'ZREMRANGEBYSCORE', int,
         ),
         string_keys_to_dict('ZSCORE ZINCRBY', float_or_none),
         string_keys_to_dict(
-            'ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE',
+            'ZRANGE ZRANGEBYSCORE ZREVRANGE ZREVRANGEBYSCORE ZPOPMAX ZPOPMIN ZINTER ZDIFF ZUNION',
             zset_score_pairs,
         ),
         string_keys_to_dict('ZRANK ZREVRANK', int_or_none),
         {
             'ZSCAN': parse_zscan,
+            'ZADD': parse_zadd,
+            'ZMSCORE': parse_zmscore
         },
+        string_keys_to_dict('BZPOPMIN BZPOPMAX',
+                            lambda r: r and (r[0], r[1], float(r[2])) or None)
     )
 
     async def zadd(self, name, *args, **kwargs):
@@ -117,11 +135,48 @@ class SortedSetCommandMixin:
         """
         return await self.execute_command('ZCOUNT', name, min, max)
 
+    async def zdiff(self, keys, withscores=False):
+        """
+        Returns the difference between the first and all successive input
+        sorted sets provided in ``keys``.
+
+        For more information check https://redis.io/commands/zdiff
+        """
+        pieces = [len(keys), *keys]
+        if withscores:
+            pieces.append("WITHSCORES")
+        return await self.execute_command("ZDIFF", *pieces)
+
+    async def zdiffstore(self, dest, keys):
+        """
+        Computes the difference between the first and all successive input
+        sorted sets provided in ``keys`` and stores the result in ``dest``.
+
+        For more information check https://redis.io/commands/zdiffstore
+        """
+        pieces = [len(keys), *keys]
+        return await self.execute_command("ZDIFFSTORE", dest, *pieces)
+
     async def zincrby(self, name, value, amount=1):
         """
         Increments the score of ``value`` in sorted set ``name`` by ``amount``
         """
         return await self.execute_command('ZINCRBY', name, amount, value)
+
+    async def zinter(self, keys, aggregate=None, withscores=False):
+        """
+        Return the intersect of multiple sorted sets specified by ``keys``.
+        With the ``aggregate`` option, it is possible to specify how the
+        results of the union are aggregated. This option defaults to SUM,
+        where the score of an element is summed across the inputs where it
+        exists. When this option is set to either MIN or MAX, the resulting
+        set will contain the minimum or maximum score of an element across
+        the inputs where it exists.
+
+        For more information check https://redis.io/commands/zinter
+        """
+        return await self._zaggregate('ZINTER', None, keys, aggregate,
+                                      withscores=withscores)
 
     async def zinterstore(self, dest, keys, aggregate=None):
         """
@@ -139,31 +194,45 @@ class SortedSetCommandMixin:
         return await self.execute_command('ZLEXCOUNT', name, min, max)
 
     async def zrange(self, name, start, end, desc=False, withscores=False,
-                     score_cast_func=float):
+                     score_cast_func=float, byscore=False, bylex=False,
+                     offset=None, num=None):
         """
-        Returns a range of values from sorted set ``name`` between
+        Return a range of values from sorted set ``name`` between
         ``start`` and ``end`` sorted in ascending order.
 
         ``start`` and ``end`` can be negative, indicating the end of the range.
 
-        ``desc`` a boolean indicating whether to sort the results descendingly
+        ``desc`` a boolean indicating whether to sort the results in reversed
+        order.
 
         ``withscores`` indicates to return the scores along with the values.
-        The return type is a list of (value, score) pairs
+        The return type is a list of (value, score) pairs.
 
-        ``score_cast_func`` a callable used to cast the score return value
+        ``score_cast_func`` a callable used to cast the score return value.
+
+        ``byscore`` when set to True, returns the range of elements from the
+        sorted set having scores equal or between ``start`` and ``end``.
+
+        ``bylex`` when set to True, returns the range of elements from the
+        sorted set between the ``start`` and ``end`` lexicographical closed
+        range intervals.
+        Valid ``start`` and ``end`` must start with ( or [, in order to specify
+        whether the range interval is exclusive or inclusive, respectively.
+
+        ``offset`` and ``num`` are specified, then return a slice of the range.
+        Can't be provided when using ``bylex``.
+
+        For more information check https://redis.io/commands/zrange
         """
-        if desc:
-            return await self.zrevrange(name, start, end, withscores,
-                                        score_cast_func)
-        pieces = ['ZRANGE', name, start, end]
-        if withscores:
-            pieces.append(b('WITHSCORES'))
-        options = {
-            'withscores': withscores,
-            'score_cast_func': score_cast_func,
-        }
-        return await self.execute_command(*pieces, **options)
+        # Need to support ``desc`` also when using old redis version
+        # because it was supported in 3.5.3 (of redis-py)
+        if not byscore and not bylex and (offset is None and num is None) \
+                and desc:
+            return self.zrevrange(name, start, end, withscores,
+                                  score_cast_func)
+
+        return await self._zrange('ZRANGE', None, name, start, end, desc, byscore,
+                                  bylex, withscores, score_cast_func, offset, num)
 
     async def zrangebylex(self, name, min, max, start=None, num=None):
         """
@@ -319,8 +388,20 @@ class SortedSetCommandMixin:
         return await self.execute_command('ZREVRANK', name, value)
 
     async def zscore(self, name, value):
-        'Return the score of element ``value`` in sorted set ``name``'
+        """Return the score of element ``value`` in sorted set ``name``"""
         return await self.execute_command('ZSCORE', name, value)
+
+    async def zunion(self, keys, aggregate=None, withscores=False):
+        """
+        Return the union of multiple sorted sets specified by ``keys``.
+        ``keys`` can be provided as dictionary of keys and their weights.
+        Scores will be aggregated based on the ``aggregate``, or SUM if
+        none is provided.
+
+        For more information check https://redis.io/commands/zunion
+        """
+        return await self._zaggregate('ZUNION', None, keys, aggregate,
+                                      withscores=withscores)
 
     async def zunionstore(self, dest, keys, aggregate=None):
         """
@@ -330,20 +411,77 @@ class SortedSetCommandMixin:
         """
         return await self._zaggregate('ZUNIONSTORE', dest, keys, aggregate)
 
-    async def _zaggregate(self, command, dest, keys, aggregate=None):
-        pieces = [command, dest, len(keys)]
+    async def zmscore(self, key, members):
+        """
+        Returns the scores associated with the specified members
+        in the sorted set stored at key.
+        ``members`` should be a list of the member name.
+        Return type is a list of score.
+        If the member does not exist, a None will be returned
+        in corresponding position.
+
+        For more information check https://redis.io/commands/zmscore
+        """
+        if not members:
+            raise DataError('ZMSCORE members must be a non-empty list')
+        pieces = [key] + members
+        return await self.execute_command('ZMSCORE', *pieces)
+
+    async def _zrange(self, command, dest, name, start, end, desc=False,
+                      byscore=False, bylex=False, withscores=False,
+                      score_cast_func=float, offset=None, num=None):
+        if byscore and bylex:
+            raise DataError("``byscore`` and ``bylex`` can not be "
+                            "specified together.")
+        if (offset is not None and num is None) or \
+                (num is not None and offset is None):
+            raise DataError("``offset`` and ``num`` must both be specified.")
+        if bylex and withscores:
+            raise DataError("``withscores`` not supported in combination "
+                            "with ``bylex``.")
+        pieces = [command]
+        if dest:
+            pieces.append(dest)
+        pieces.extend([name, start, end])
+        if byscore:
+            pieces.append('BYSCORE')
+        if bylex:
+            pieces.append('BYLEX')
+        if desc:
+            pieces.append('REV')
+        if offset is not None and num is not None:
+            pieces.extend(['LIMIT', offset, num])
+        if withscores:
+            pieces.append('WITHSCORES')
+        options = {
+            'withscores': withscores,
+            'score_cast_func': score_cast_func
+        }
+        return await self.execute_command(*pieces, **options)
+
+    async def _zaggregate(self, command, dest, keys, aggregate=None,
+                          **options):
+        pieces = [command]
+        if dest is not None:
+            pieces.append(dest)
+        pieces.append(len(keys))
         if isinstance(keys, dict):
-            keys, weights = iter(keys.keys()), iter(keys.values())
+            keys, weights = keys.keys(), keys.values()
         else:
             weights = None
         pieces.extend(keys)
         if weights:
-            pieces.append(b('WEIGHTS'))
+            pieces.append(b'WEIGHTS')
             pieces.extend(weights)
         if aggregate:
-            pieces.append(b('AGGREGATE'))
-            pieces.append(aggregate)
-        return await self.execute_command(*pieces)
+            if aggregate.upper() in ['SUM', 'MIN', 'MAX']:
+                pieces.append(b'AGGREGATE')
+                pieces.append(aggregate)
+            else:
+                raise DataError("aggregate can be sum, min or max.")
+        if options.get('withscores', False):
+            pieces.append(b'WITHSCORES')
+        return await self.execute_command(*pieces, **options)
 
     async def zscan(self, name, cursor=0, match=None, count=None,
                     score_cast_func=float):
@@ -364,6 +502,134 @@ class SortedSetCommandMixin:
             pieces.extend([b('COUNT'), count])
         options = {'score_cast_func': score_cast_func}
         return await self.execute_command('ZSCAN', *pieces, **options)
+
+    async def zpopmax(self, name, count=None):
+        """
+        Remove and return up to ``count`` members with the highest scores
+        from the sorted set ``name``.
+
+        For more information check https://redis.io/commands/zpopmax
+        """
+        args = (count is not None) and [count] or []
+        options = {
+            'withscores': True
+        }
+        return await self.execute_command('ZPOPMAX', name, *args, **options)
+
+    async def zpopmin(self, name, count=None):
+        """
+        Remove and return up to ``count`` members with the lowest scores
+        from the sorted set ``name``.
+
+        For more information check https://redis.io/commands/zpopmin
+        """
+        args = (count is not None) and [count] or []
+        options = {
+            'withscores': True
+        }
+        return await self.execute_command('ZPOPMIN', name, *args, **options)
+
+    async def zrandmember(self, key, count=None, withscores=False):
+        """
+        Return a random element from the sorted set value stored at key.
+
+        ``count`` if the argument is positive, return an array of distinct
+        fields. If called with a negative count, the behavior changes and
+        the command is allowed to return the same field multiple times.
+        In this case, the number of returned fields is the absolute value
+        of the specified count.
+
+        ``withscores`` The optional WITHSCORES modifier changes the reply so it
+        includes the respective scores of the randomly selected elements from
+        the sorted set.
+
+        For more information check https://redis.io/commands/zrandmember
+        """
+        params = []
+        if count is not None:
+            params.append(count)
+        if withscores:
+            params.append("WITHSCORES")
+
+        return await self.execute_command("ZRANDMEMBER", key, *params)
+
+    async def bzpopmax(self, keys, timeout=0):
+        """
+        ZPOPMAX a value off of the first non-empty sorted set
+        named in the ``keys`` list.
+
+        If none of the sorted sets in ``keys`` has a value to ZPOPMAX,
+        then block for ``timeout`` seconds, or until a member gets added
+        to one of the sorted sets.
+
+        If timeout is 0, then block indefinitely.
+
+        For more information check https://redis.io/commands/bzpopmax
+        """
+        if timeout is None:
+            timeout = 0
+        keys = list_or_args(keys, None)
+        keys.append(timeout)
+        return await self.execute_command('BZPOPMAX', *keys)
+
+    async def bzpopmin(self, keys, timeout=0):
+        """
+        ZPOPMIN a value off of the first non-empty sorted set
+        named in the ``keys`` list.
+
+        If none of the sorted sets in ``keys`` has a value to ZPOPMIN,
+        then block for ``timeout`` seconds, or until a member gets added
+        to one of the sorted sets.
+
+        If timeout is 0, then block indefinitely.
+
+        For more information check https://redis.io/commands/bzpopmin
+        """
+        if timeout is None:
+            timeout = 0
+        keys = list_or_args(keys, None)
+        keys.append(timeout)
+        return await self.execute_command('BZPOPMIN', *keys)
+
+    async def zmpop(self, numkeys, keys, **kwargs):
+        keys = list_or_args(keys)
+        pass  # todo
+
+    async def bzmpop(self, timeout, numkeys, keys, **kwargs):
+        """
+        https://redis.io/commands/bzmpop
+        """
+        keys = list_or_args(keys)
+        pass
+
+    async def zrangestore(self, dest, name, start, end,
+                          byscore=False, bylex=False, desc=False,
+                          offset=None, num=None):
+        """
+        Stores in ``dest`` the result of a range of values from sorted set
+        ``name`` between ``start`` and ``end`` sorted in ascending order.
+
+        ``start`` and ``end`` can be negative, indicating the end of the range.
+
+        ``byscore`` when set to True, returns the range of elements from the
+        sorted set having scores equal or between ``start`` and ``end``.
+
+        ``bylex`` when set to True, returns the range of elements from the
+        sorted set between the ``start`` and ``end`` lexicographical closed
+        range intervals.
+        Valid ``start`` and ``end`` must start with ( or [, in order to specify
+        whether the range interval is exclusive or inclusive, respectively.
+
+        ``desc`` a boolean indicating whether to sort the results in reversed
+        order.
+
+        ``offset`` and ``num`` are specified, then return a slice of the range.
+        Can't be provided when using ``bylex``.
+
+        For more information check https://redis.io/commands/zrangestore
+        """
+        return await self._zrange('ZRANGESTORE', dest, name, start, end, desc,
+                                  byscore, bylex, False, None, offset, num)
 
 
 class ClusterSortedSetCommandMixin(SortedSetCommandMixin):

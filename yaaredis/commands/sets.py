@@ -69,6 +69,16 @@ class SetsCommandMixin:
         """Returns all members of the set ``name``"""
         return await self.execute_command('SMEMBERS', name)
 
+    async def smismember(self, name, values, *args):
+        """
+        Return whether each value in ``values`` is a member of the set ``name``
+        as a list of ``bool`` in the order of ``values``
+
+        For more information check https://redis.io/commands/smismember
+        """
+        args = list_or_args(values, args)
+        return await self.execute_command('SMISMEMBER', name, *args)
+
     async def smove(self, src, dst, value):
         """Moves ``value`` from set ``src`` to set ``dst`` atomically"""
         return await self.execute_command('SMOVE', src, dst, value)
