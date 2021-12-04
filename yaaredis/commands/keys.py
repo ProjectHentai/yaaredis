@@ -8,6 +8,7 @@ from yaaredis.utils import (b,
                             first_key,
                             int_or_none,
                             list_keys_to_dict,
+                            list_or_args,
                             merge_result,
                             NodeFlag,
                             string_keys_to_dict)
@@ -18,10 +19,10 @@ def sort_return_tuples(response, **options):
     If ``groups`` is specified, return the response as a list of
     n-element tuples with n being the value found in options['groups']
     """
-    if not response or not options['groups']:
+    if not response or not options.get('groups'):
         return response
     n = options['groups']
-    return list(zip(*(response[i::n] for i in range(n))))
+    return list(zip(*[response[i::n] for i in range(n)]))
 
 
 def parse_object(response, infotype):
@@ -40,11 +41,13 @@ class KeysCommandMixin:
     # pylint: disable=too-many-public-methods
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
-            'EXISTS EXPIRE EXPIREAT '
-            'MOVE PERSIST RENAMENX', bool,
+            'EXPIRE EXPIREAT MOVE PERSIST RENAMENX PEXPIRE PEXPIREAT', bool
         ),
         {
+            'COPY': bool,
             'DEL': int,
+            'EXISTS': int,
+            'UNLINK': int,
             'SORT': sort_return_tuples,
             'OBJECT': parse_object,
             'RANDOMKEY': lambda r: r and r or None,
@@ -52,6 +55,26 @@ class KeysCommandMixin:
             'RENAME': bool_ok,
         },
     )
+
+    async def copy(self, source, destination, destination_db=None, replace=False):
+        """
+        Copy the value stored in the ``source`` key to the ``destination`` key.
+
+        ``destination_db`` an alternative destination database. By default,
+        the ``destination`` key is created in the source Redis database.
+
+        ``replace`` whether the ``destination`` key should be removed before
+        copying the value to it. By default, the value is not copied if
+        the ``destination`` key already exists.
+
+        For more information check https://redis.io/commands/copy
+        """
+        params = [source, destination]
+        if destination_db is not None:
+            params.extend(["DB", destination_db])
+        if replace:
+            params.append("REPLACE")
+        return await self.execute_command('COPY', *params)
 
     async def delete(self, *names):
         """Delete one or more keys specified by ``names``"""
@@ -64,9 +87,13 @@ class KeysCommandMixin:
         """
         return await self.execute_command('DUMP', name)
 
-    async def exists(self, name):
-        """Returns a boolean indicating whether key ``name`` exists"""
-        return await self.execute_command('EXISTS', name)
+    async def exists(self, *names):
+        """
+        Returns the number of ``names`` that exist
+
+        For more information check https://redis.io/commands/exists
+        """
+        return await self.execute_command('EXISTS', *names)
 
     async def expire(self, name, time):
         """
@@ -90,6 +117,43 @@ class KeysCommandMixin:
         """Returns a list of keys matching ``pattern``"""
         return await self.execute_command('KEYS', pattern)
 
+    async def migrate(self, host, port, keys, destination_db, timeout,
+                      copy=False, replace=False, auth=None):
+        """
+        Migrate 1 or more keys from the current Redis server to a different
+        server specified by the ``host``, ``port`` and ``destination_db``.
+
+        The ``timeout``, specified in milliseconds, indicates the maximum
+        time the connection between the two servers can be idle before the
+        command is interrupted.
+
+        If ``copy`` is True, the specified ``keys`` are NOT deleted from
+        the source server.
+
+        If ``replace`` is True, this operation will overwrite the keys
+        on the destination server if they exist.
+
+        If ``auth`` is specified, authenticate to the destination server with
+        the password provided.
+
+        For more information check https://redis.io/commands/migrate
+        """
+        keys = list_or_args(keys, [])
+        if not keys:
+            raise DataError('MIGRATE requires at least one key')
+        pieces = []
+        if copy:
+            pieces.append(b'COPY')
+        if replace:
+            pieces.append(b'REPLACE')
+        if auth:
+            pieces.append(b'AUTH')
+            pieces.append(auth)
+        pieces.append(b'KEYS')
+        pieces.extend(keys)
+        return await self.execute_command('MIGRATE', host, port, '', destination_db,
+                                          timeout, *pieces)
+
     async def move(self, name, db):
         """Moves the key ``name`` to a different Redis database ``db``"""
         return await self.execute_command('MOVE', name, db)
@@ -102,7 +166,7 @@ class KeysCommandMixin:
         """Removes an expiration on ``name``"""
         return await self.execute_command('PERSIST', name)
 
-    async def pexpire(self, name, time):
+    async def pexpire(self, name, time, nx=None, xx=None, gt=None, lt=None):
         """
         Set an expire flag on key ``name`` for ``time`` milliseconds.
         ``time`` can be represented by an integer or a Python timedelta
@@ -111,7 +175,16 @@ class KeysCommandMixin:
         if isinstance(time, datetime.timedelta):
             ms = int(time.microseconds / 1000)
             time = (time.seconds + time.days * 24 * 3600) * 1000 + ms
-        return await self.execute_command('PEXPIRE', name, time)
+        pieces = [name, time]
+        if nx is not None:
+            pieces.append(b'NX')
+        if xx is not None:
+            pieces.append(b'XX')
+        if gt is not None:
+            pieces.append(b'GT')
+        if lt is not None:
+            pieces.append(b'LT')
+        return await self.execute_command('PEXPIRE', *pieces)
 
     async def pexpireat(self, name, when):
         """
@@ -144,14 +217,46 @@ class KeysCommandMixin:
         """Renames key ``src`` to ``dst`` if ``dst`` doesn't already exist"""
         return await self.execute_command('RENAMENX', src, dst)
 
-    async def restore(self, name, ttl, value, replace=False):
+    async def restore(self, name, ttl, value, replace=False, absttl=False,
+                      idletime=None, frequency=None):
         """
-        Creates a key using the provided serialized value, previously obtained
+        Create a key using the provided serialized value, previously obtained
         using DUMP.
+
+        ``replace`` allows an existing key on ``name`` to be overridden. If
+        it's not specified an error is raised on collision.
+
+        ``absttl`` if True, specified ``ttl`` should represent an absolute Unix
+        timestamp in milliseconds in which the key will expire. (Redis 5.0 or
+        greater).
+
+        ``idletime`` Used for eviction, this is the number of seconds the
+        key must be idle, prior to execution.
+
+        ``frequency`` Used for eviction, this is the frequency counter of
+        the object stored at the key, prior to execution.
+
+        For more information check https://redis.io/commands/restore
         """
         params = [name, ttl, value]
         if replace:
             params.append('REPLACE')
+        if absttl:
+            params.append('ABSTTL')
+        if idletime is not None:
+            params.append('IDLETIME')
+            try:
+                params.append(int(idletime))
+            except ValueError:
+                raise DataError("idletimemust be an integer")
+
+        if frequency is not None:
+            params.append('FREQ')
+            try:
+                params.append(int(frequency))
+            except ValueError:
+                raise DataError("frequency must be an integer")
+
         return await self.execute_command('RESTORE', *params)
 
     async def sort(self, name, start=None, num=None, by=None, get=None,
@@ -238,9 +343,13 @@ class KeysCommandMixin:
         """Returns the type of key ``name``"""
         return await self.execute_command('TYPE', name)
 
-    async def unlink(self, *keys):
-        """Removes the specified keys in a different thread, not blocking"""
-        return await self.execute_command('UNLINK', *keys)
+    async def unlink(self, *names):
+        """
+        Unlink one or more keys specified by ``names``
+
+        For more information check https://redis.io/commands/unlink
+        """
+        return await self.execute_command('UNLINK', *names)
 
     async def wait(self, num_replicas, timeout):
         """
@@ -251,25 +360,30 @@ class KeysCommandMixin:
         """
         return await self.execute_command('WAIT', num_replicas, timeout)
 
-    async def scan(self, cursor=0, match=None, count=None,
-                   type=None):  # pylint: disable=redefined-builtin
+    async def scan(self, cursor=0, match=None, count=None, _type=None):
         """
         Incrementally return lists of key names. Also return a cursor
         indicating the scan position.
 
         ``match`` allows for filtering the keys by pattern
 
-        ``count`` allows for hint the minimum number of returns
+        ``count`` provides a hint to Redis about the number of keys to
+            return per batch.
 
-        ``type`` filters results by a redis type
+        ``_type`` filters the returned values by a particular Redis type.
+            Stock Redis instances allow for the following types:
+            HASH, LIST, SET, STREAM, STRING, ZSET
+            Additionally, Redis modules can expose other types as well.
+
+        For more information check https://redis.io/commands/scan
         """
         pieces = [cursor]
         if match is not None:
-            pieces.extend([b('MATCH'), match])
+            pieces.extend([b'MATCH', match])
         if count is not None:
-            pieces.extend([b('COUNT'), count])
-        if type is not None:
-            pieces.extend([b('TYPE'), type])
+            pieces.extend([b'COUNT', count])
+        if _type is not None:
+            pieces.extend([b'TYPE', _type])
         return await self.execute_command('SCAN', *pieces)
 
 

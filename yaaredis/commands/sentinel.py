@@ -71,7 +71,7 @@ def parse_sentinel_slaves_and_sentinels(response):
 
 
 def parse_sentinel_get_master(response):
-    return (response[0], int(response[1])) if response else None
+    return response and (response[0], int(response[1])) or None
 
 
 class SentinelCommandMixin:
@@ -84,6 +84,10 @@ class SentinelCommandMixin:
         'SENTINEL SENTINELS': parse_sentinel_slaves_and_sentinels,
         'SENTINEL SET': bool_ok,
         'SENTINEL SLAVES': parse_sentinel_slaves_and_sentinels,
+        'SENTINEL CKQUORUM': bool_ok,
+        'SENTINEL FAILOVER': bool_ok,
+        'SENTINEL FLUSHCONFIG': bool_ok,
+        'SENTINEL RESET': bool_ok
     }
 
     async def sentinel_get_master_addr_by_name(self, service_name):
@@ -118,6 +122,57 @@ class SentinelCommandMixin:
     async def sentinel_slaves(self, service_name):
         """Returns a list of slaves for ``service_name``"""
         return await self.execute_command('SENTINEL SLAVES', service_name)
+
+    async def sentinel_reset(self, pattern):
+        """
+        This command will reset all the masters with matching name.
+        The pattern argument is a glob-style pattern.
+
+        The reset process clears any previous state in a master (including a
+        failover in progress), and removes every slave and sentinel already
+        discovered and associated with the master.
+        """
+        return await self.execute_command('SENTINEL RESET', pattern, once=True)
+
+    async def sentinel_failover(self, new_master_name):
+        """
+        Force a failover as if the master was not reachable, and without
+        asking for agreement to other Sentinels (however a new version of the
+        configuration will be published so that the other Sentinels will
+        update their configurations).
+        """
+        return await self.execute_command('SENTINEL FAILOVER', new_master_name)
+
+    async def sentinel_ckquorum(self, new_master_name):
+        """
+        Check if the current Sentinel configuration is able to reach the
+        quorum needed to failover a master, and the majority needed to
+        authorize the failover.
+
+        This command should be used in monitoring systems to check if a
+        Sentinel deployment is ok.
+        """
+        return await self.execute_command('SENTINEL CKQUORUM',
+                                          new_master_name,
+                                          once=True)
+
+    async def sentinel_flushconfig(self):
+        """
+        Force Sentinel to rewrite its configuration on disk, including the
+        current Sentinel state.
+
+        Normally Sentinel rewrites the configuration every time something
+        changes in its state (in the context of the subset of the state which
+        is persisted on disk across restart).
+        However sometimes it is possible that the configuration file is lost
+        because of operation errors, disk failures, package upgrade scripts or
+        configuration managers. In those cases a way to to force Sentinel to
+        rewrite the configuration file is handy.
+
+        This command works even if the previous configuration file is
+        completely missing.
+        """
+        return await self.execute_command('SENTINEL FLUSHCONFIG')
 
 
 class ClusterSentinelCommands(SentinelCommandMixin):

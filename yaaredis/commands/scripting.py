@@ -1,5 +1,5 @@
 from yaaredis.exceptions import DataError
-from yaaredis.utils import bool_ok, dict_merge, list_keys_to_dict, nativestr, NodeFlag
+from yaaredis.utils import bool_ok, dict_merge, list_keys_to_dict, nativestr, NodeFlag, str_if_bytes
 
 
 class ScriptingCommandMixin:
@@ -7,7 +7,7 @@ class ScriptingCommandMixin:
         'SCRIPT EXISTS': lambda r: list(map(bool, r)),
         'SCRIPT FLUSH': bool_ok,
         'SCRIPT KILL': bool_ok,
-        'SCRIPT LOAD': nativestr,
+        'SCRIPT LOAD': str_if_bytes
     }
 
     async def eval(self, script, numkeys, *keys_and_args):
@@ -33,8 +33,8 @@ class ScriptingCommandMixin:
         """
         return await self.execute_command('EVALSHA', sha, numkeys, *keys_and_args)
 
-    async def script_debug(self, arg):
-        return await self.execute_command('SCRIPT DEBUG', arg) # todo danger
+    async def script_debug(self, *args):
+        return await self.execute_command('SCRIPT DEBUG', *args)  # todo danger
 
     async def script_exists(self, *args):
         """

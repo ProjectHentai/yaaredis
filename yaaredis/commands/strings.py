@@ -35,60 +35,116 @@ def parse_stralgo(response, **options):
     return str_if_bytes(response)
 
 
-class BitField:
+def parse_set_result(response, **options):
     """
-    The command treats a Redis string as a array of bits,
-    and is capable of addressing specific integer fields
-    of varying bit widths and arbitrary non (necessary) aligned offset.
+    Handle SET result since GET argument is available since Redis 6.2.
+    Parsing SET result into:
+    - BOOL
+    - String when GET argument is used
+    """
+    if options.get('get'):
+        # Redis will return a getCommand result.
+        # See `setGenericCommand` in t_string.c
+        return response
+    return response and str_if_bytes(response) == 'OK'
 
-    The supported types are up to 64 bits for signed integers,
-    and up to 63 bits for unsigned integers.
 
-    Offset can be num prefixed with `#` character or num directly,
-    for command detail you should see: https://redis.io/commands/bitfield
+class BitFieldOperation:
+    """
+    Command builder for BITFIELD commands.
     """
 
-    def __init__(self, redis_client, key):
-        self._command_stack = ['BITFIELD', key]
-        self.redis = redis_client
+    def __init__(self, client, key, default_overflow=None):
+        self.client = client
+        self.key = key
+        self._default_overflow = default_overflow
+        self.reset()
 
-    def __del__(self):
-        self._command_stack.clear()
+    def reset(self):
+        """
+        Reset the state of the instance to when it was constructed
+        """
+        self.operations = []
+        self._last_overflow = 'WRAP'
+        self.overflow(self._default_overflow or self._last_overflow)
 
-    def set(self, type, offset, value):
+    def overflow(self, overflow):
         """
-        Set the specified bit field and returns its old value.
+        Update the overflow algorithm of successive INCRBY operations
+        :param overflow: Overflow algorithm, one of WRAP, SAT, FAIL. See the
+            Redis docs for descriptions of these algorithmsself.
+        :returns: a :py:class:`BitFieldOperation` instance.
         """
-        self._command_stack.extend(['SET', type, offset, value])
+        overflow = overflow.upper()
+        if overflow != self._last_overflow:
+            self._last_overflow = overflow
+            self.operations.append(('OVERFLOW', overflow))
         return self
 
-    def get(self, type, offset):
+    def incrby(self, fmt, offset, increment, overflow=None):
         """
-        Returns the specified bit field.
+        Increment a bitfield by a given amount.
+        :param fmt: format-string for the bitfield being updated, e.g. 'u8'
+            for an unsigned 8-bit integer.
+        :param offset: offset (in number of bits). If prefixed with a
+            '#', this is an offset multiplier, e.g. given the arguments
+            fmt='u8', offset='#2', the offset will be 16.
+        :param int increment: value to increment the bitfield by.
+        :param str overflow: overflow algorithm. Defaults to WRAP, but other
+            acceptable values are SAT and FAIL. See the Redis docs for
+            descriptions of these algorithms.
+        :returns: a :py:class:`BitFieldOperation` instance.
         """
-        self._command_stack.extend(['GET', type, offset])
+        if overflow is not None:
+            self.overflow(overflow)
+
+        self.operations.append(('INCRBY', fmt, offset, increment))
         return self
 
-    def incrby(self, type, offset, increment):
+    def get(self, fmt, offset):
         """
-        Increments or decrements (if a negative increment is given)
-        the specified bit field and returns the new value.
+        Get the value of a given bitfield.
+        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
+            an unsigned 8-bit integer.
+        :param offset: offset (in number of bits). If prefixed with a
+            '#', this is an offset multiplier, e.g. given the arguments
+            fmt='u8', offset='#2', the offset will be 16.
+        :returns: a :py:class:`BitFieldOperation` instance.
         """
-        self._command_stack.extend(['INCRBY', type, offset, increment])
+        self.operations.append(('GET', fmt, offset))
         return self
 
-    def overflow(self, type='SAT'):
+    def set(self, fmt, offset, value):
         """
-        fine-tune the behavior of the increment or decrement overflow,
-        have no effect unless used before `incrby`
-        three types are available: WRAP|SAT|FAIL
+        Set the value of a given bitfield.
+        :param fmt: format-string for the bitfield being read, e.g. 'u8' for
+            an unsigned 8-bit integer.
+        :param offset: offset (in number of bits). If prefixed with a
+            '#', this is an offset multiplier, e.g. given the arguments
+            fmt='u8', offset='#2', the offset will be 16.
+        :param int value: value to set at the given position.
+        :returns: a :py:class:`BitFieldOperation` instance.
         """
-        self._command_stack.extend(['OVERFLOW', type])
+        self.operations.append(('SET', fmt, offset, value))
         return self
 
-    async def exc(self):
-        """execute commands in command stack"""
-        return await self.redis.execute_command(*self._command_stack)
+    @property
+    def command(self):
+        cmd = ['BITFIELD', self.key]
+        for ops in self.operations:
+            cmd.extend(ops)
+        return cmd
+
+    async def execute(self):
+        """
+        Execute the operation(s) in a single BITFIELD command. The return value
+        is a list of values corresponding to each operation. If the client
+        used to create this instance was a pipeline, the list of values
+        will be present within the pipeline's execute.
+        """
+        command = self.command
+        self.reset()
+        return await self.client.execute_command(*command)
 
 
 class StringsCommandMixin:
@@ -105,7 +161,7 @@ class StringsCommandMixin:
         {
             'INCRBYFLOAT': float,
             'MSET': bool_ok,
-            'SET': lambda r: r and nativestr(r) == 'OK',
+            'SET': parse_set_result,
             'STRALGO': parse_stralgo,
         },
     )
@@ -160,8 +216,14 @@ class StringsCommandMixin:
                              'when end is specified')
         return await self.execute_command('BITPOS', *params)
 
-    def bitfield(self, key):
-        return BitField(self, key)
+    def bitfield(self, key, default_overflow=None):
+        """
+        Return a BitFieldOperation instance to conveniently construct one or
+        more bitfield operations on ``key``.
+
+        For more information check https://redis.io/commands/bitfield
+        """
+        return BitFieldOperation(self, key, default_overflow=default_overflow)
 
     async def decr(self, name, amount=1):
         """
@@ -303,19 +365,18 @@ class StringsCommandMixin:
         args = list_or_args(keys, args)
         return await self.execute_command('MGET', *args)
 
-    async def mset(self, *args, **kwargs):
+    def mset(self, mapping):
         """
-        Sets key/values based on a mapping. Mapping can be supplied as a single
-        dictionary argument or as kwargs.
+        Sets key/values based on a mapping. Mapping is a dictionary of
+        key/value pairs. Both keys and values should be strings or types that
+        can be cast to a string via str().
+
+        For more information check https://redis.io/commands/mset
         """
-        if args:
-            if len(args) != 1 or not isinstance(args[0], dict):
-                raise RedisError('MSET requires **kwargs or a single dict arg')
-            kwargs.update(args[0])
         items = []
-        for pair in iter(kwargs.items()):
+        for pair in mapping.items():
             items.extend(pair)
-        return await self.execute_command('MSET', *items)
+        return self.execute_command('MSET', *items)
 
     async def msetnx(self, mapping):
         """
