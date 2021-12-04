@@ -1,4 +1,4 @@
-from yaaredis.exceptions import RedisError
+from yaaredis.exceptions import RedisError, DataError
 from yaaredis.utils import b, nativestr
 
 
@@ -46,17 +46,41 @@ class GeoCommandMixin:
     }
 
     # GEO COMMANDS
-    async def geoadd(self, name, *values):
+    async def geoadd(self, name, values, nx=False, xx=False, ch=False):
         """
         Add the specified geospatial items to the specified key identified
         by the ``name`` argument. The Geospatial items are given as ordered
         members of the ``values`` argument, each item or place is formed by
-        the triad latitude, longitude and name.
+        the triad longitude, latitude and name.
+
+        Note: You can use ZREM to remove elements.
+
+        ``nx`` forces ZADD to only create new elements and not to update
+        scores for elements that already exist.
+
+        ``xx`` forces ZADD to only update scores of elements that already
+        exist. New elements will not be added.
+
+        ``ch`` modifies the return value to be the numbers of elements changed.
+        Changed elements include new elements that were added and elements
+        whose scores changed.
+
+        For more information check https://redis.io/commands/geoadd
         """
+        if nx and xx:
+            raise DataError("GEOADD allows either 'nx' or 'xx', not both")
         if len(values) % 3 != 0:
-            raise RedisError('GEOADD requires places with lon, lat and name'
-                             ' values')
-        return await self.execute_command('GEOADD', name, *values)
+            raise DataError("GEOADD requires places with lon, lat and name"
+                            " values")
+        pieces = [name]
+        if nx:
+            pieces.append('NX')
+        if xx:
+            pieces.append('XX')
+        if ch:
+            pieces.append('CH')
+        pieces.extend(values)
+        return await self.execute_command('GEOADD', *pieces)
 
     async def geodist(self, name, place1, place2, unit=None):
         """

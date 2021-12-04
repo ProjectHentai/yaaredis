@@ -170,11 +170,31 @@ class StringsCommandMixin:
         """
         return await self.execute_command('DECRBY', name, amount)
 
+    async def decrby(self, name, amount=1):
+        """
+        Decrements the value of ``key`` by ``amount``.  If no key exists,
+        the value will be initialized as 0 - ``amount``
+
+        For more information check https://redis.io/commands/decrby
+        """
+        return await self.execute_command('DECRBY', name, amount)
+
     async def get(self, name):
         """
         Return the value at key ``name``, or None if the key doesn't exist
         """
         return await self.execute_command('GET', name)
+
+    async def getdel(self, name):
+        """
+        Get the value at key ``name`` and delete the key. This command
+        is similar to GET, except for the fact that it also deletes
+        the key on success (if and only if the key's value type
+        is a string).
+
+        For more information check https://redis.io/commands/getdel
+        """
+        return await self.execute_command('GETDEL', name)
 
     async def getex(self, name,
                     ex=None, px=None, exat=None, pxat=None, persist=False):
@@ -297,19 +317,17 @@ class StringsCommandMixin:
             items.extend(pair)
         return await self.execute_command('MSET', *items)
 
-    async def msetnx(self, *args, **kwargs):
+    async def msetnx(self, mapping):
         """
         Sets key/values based on a mapping if none of the keys are already set.
-        Mapping can be supplied as a single dictionary argument or as kwargs.
+        Mapping is a dictionary of key/value pairs. Both keys and values
+        should be strings or types that can be cast to a string via str().
         Returns a boolean indicating if the operation was successful.
+
+        For more information check https://redis.io/commands/msetnx
         """
-        if args:
-            if len(args) != 1 or not isinstance(args[0], dict):
-                raise RedisError('MSETNX requires **kwargs or a single '
-                                 'dict arg')
-            kwargs.update(args[0])
         items = []
-        for pair in iter(kwargs.items()):
+        for pair in mapping.items():
             items.extend(pair)
         return await self.execute_command('MSETNX', *items)
 

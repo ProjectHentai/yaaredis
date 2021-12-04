@@ -1,4 +1,4 @@
-from yaaredis.exceptions import RedisError
+from yaaredis.exceptions import RedisError, DataError
 from yaaredis.utils import bool_ok, dict_merge, pairs_to_dict, string_keys_to_dict
 
 
@@ -107,32 +107,27 @@ class StreamsCommandMixin:
         """
         return await self.execute_command('XLEN', name)
 
-    async def xrange(self, name: str, start='-', end='+', count=None) -> list:
+    def xrange(self, name, min='-', max='+', count=None):
         """
         Read stream values within an interval.
-
-        Available since 5.0.0.
-        Time complexity: O(log(N)+M) with N being the number of elements in the stream and M the number
-        of elements being returned. If M is constant (e.g. always asking for the first 10 elements with COUNT),
-        you can consider it O(log(N)).
-
-        :param name: name of the stream.
-        :param start: first stream ID. defaults to '-',
+        name: name of the stream.
+        start: first stream ID. defaults to '-',
                meaning the earliest available.
-        :param end: last stream ID. defaults to '+',
+        finish: last stream ID. defaults to '+',
                 meaning the latest available.
-        :param count: if set, only return this many items, beginning with the
+        count: if set, only return this many items, beginning with the
                earliest available.
-        :return list of (stream_id, entry(k-v pair))
-        """
 
-        pieces = [start, end]
+        For more information check https://redis.io/commands/xrange
+        """
+        pieces = [min, max]
         if count is not None:
             if not isinstance(count, int) or count < 1:
-                raise RedisError('XRANGE count must be a positive integer')
-            pieces.append('COUNT')
+                raise DataError('XRANGE count must be a positive integer')
+            pieces.append(b'COUNT')
             pieces.append(str(count))
-        return await self.execute_command('XRANGE', name, *pieces)
+
+        return self.execute_command('XRANGE', name, *pieces)
 
     async def xrevrange(self, name: str, start='+', end='-', count=None) -> list:
         """
@@ -308,19 +303,15 @@ class StreamsCommandMixin:
         pieces.append(max_len)
         return await self.execute_command('XTRIM', name, *pieces)
 
-    async def xdel(self, name: str, stream_id: str) -> int:
+    async def xdel(self, name, *ids):
         """
-        [NOTICE] Not officially released yet
-        [NOTICE] In the current implementation, memory is not
-        really reclaimed until a macro node is completely empty,
-        so you should not abuse this feature.
+        Deletes one or more messages from a stream.
+        name: name of the stream.
+        *ids: message ids to delete.
 
-        remove items from the middle of a stream, just by ID.
-
-        :param name: name of the stream
-        :param stream_id: id of the options appended to the stream.
+        For more information check https://redis.io/commands/xdel
         """
-        return await self.execute_command('XDEL', name, stream_id)
+        return await self.execute_command('XDEL', name, *ids)
 
     async def xinfo_consumers(self, name: str, group: str) -> list:
         """
@@ -372,23 +363,67 @@ class StreamsCommandMixin:
         """
         return await self.execute_command('XACK', name, group, stream_id)
 
-    async def xclaim(self, name: str, group: str, consumer: str, min_idle_time: int, *stream_ids):
+    async def xclaim(self, name, groupname, consumername, min_idle_time, message_ids,
+                     idle=None, time=None, retrycount=None, force=False,
+                     justid=False):
         """
-        [NOTICE] Not officially released yet
+        Changes the ownership of a pending message.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        consumername: name of a consumer that claims the message.
+        min_idle_time: filter messages that were idle less than this amount of
+        milliseconds
+        message_ids: non-empty list or tuple of message IDs to claim
+        idle: optional. Set the idle time (last time it was delivered) of the
+         message in ms
+        time: optional integer. This is the same as idle but instead of a
+         relative amount of milliseconds, it sets the idle time to a specific
+         Unix time (in milliseconds).
+        retrycount: optional integer. set the retry counter to the specified
+         value. This counter is incremented every time a message is delivered
+         again.
+        force: optional boolean, false by default. Creates the pending message
+         entry in the PEL even if certain specified IDs are not already in the
+         PEL assigned to a different client.
+        justid: optional boolean, false by default. Return just an array of IDs
+         of messages successfully claimed, without returning the actual message
 
-        Gets ownership of one or multiple messages in the Pending Entries List of a given stream consumer group.
-
-        :param name: name of the stream
-        :param group: name of the consumer group
-        :param consumer: name of the consumer
-        :param min_idle_time: ms
-            If the message ID (among the specified ones) exists, and its idle time greater
-            or equal to min_idle_time, then the message new owner
-            becomes the specified <consumer>. If the minimum idle time specified
-            is zero, messages are claimed regardless of their idle time.
-        :param stream_ids:
+         For more information check https://redis.io/commands/xclaim
         """
-        return await self.execute_command('XCLAIM', name, group, consumer, min_idle_time, *stream_ids)
+        if not isinstance(min_idle_time, int) or min_idle_time < 0:
+            raise DataError("XCLAIM min_idle_time must be a non negative "
+                            "integer")
+        if not isinstance(message_ids, (list, tuple)) or not message_ids:
+            raise DataError("XCLAIM message_ids must be a non empty list or "
+                            "tuple of message IDs to claim")
+
+        kwargs = {}
+        pieces = [name, groupname, consumername, str(min_idle_time)]
+        pieces.extend(list(message_ids))
+
+        if idle is not None:
+            if not isinstance(idle, int):
+                raise DataError("XCLAIM idle must be an integer")
+            pieces.extend((b'IDLE', str(idle)))
+        if time is not None:
+            if not isinstance(time, int):
+                raise DataError("XCLAIM time must be an integer")
+            pieces.extend((b'TIME', str(time)))
+        if retrycount is not None:
+            if not isinstance(retrycount, int):
+                raise DataError("XCLAIM retrycount must be an integer")
+            pieces.extend((b'RETRYCOUNT', str(retrycount)))
+
+        if force:
+            if not isinstance(force, bool):
+                raise DataError("XCLAIM force must be a boolean")
+            pieces.append(b'FORCE')
+        if justid:
+            if not isinstance(justid, bool):
+                raise DataError("XCLAIM justid must be a boolean")
+            pieces.append(b'JUSTID')
+            kwargs['parse_justid'] = True
+        return await self.execute_command('XCLAIM', *pieces, **kwargs)
 
     async def xgroup_create(self, name: str, group: str, stream_id='$', mkstream: bool = False) -> bool:
         """

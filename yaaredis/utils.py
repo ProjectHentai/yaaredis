@@ -74,7 +74,7 @@ def dict_merge(*dicts):
 
 
 def bool_ok(response):
-    return nativestr(response) == 'OK'
+    return str_if_bytes(response) == 'OK'
 
 
 def list_or_args(keys, args: list = None) -> list:

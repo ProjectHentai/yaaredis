@@ -19,10 +19,6 @@ from yaaredis.commands.sorted_set import SortedSetCommandMixin
 from yaaredis.commands.streams import StreamsCommandMixin
 from yaaredis.commands.strings import ClusterStringsCommandMixin, StringsCommandMixin
 from yaaredis.commands.transaction import ClusterTransactionCommandMixin, TransactionCommandMixin
-from yaaredis.commands.memory import MemoryCommandMixin
-from yaaredis.commands.module import ModuleCommandMixin
-from yaaredis.commands.monitor import MonitorCommandMixin
-from yaaredis.commands.acl import ACLCommandMixin
 from yaaredis.compat import CancelledError
 from yaaredis.connection import RedisSSLContext, UnixDomainSocketConnection
 from yaaredis.exceptions import (AskError,
@@ -44,8 +40,7 @@ mixins = [
     KeysCommandMixin, ListsCommandMixin, PubSubCommandMixin,
     ScriptingCommandMixin, SentinelCommandMixin, ServerCommandMixin,
     SetsCommandMixin, SortedSetCommandMixin, StringsCommandMixin,
-    TransactionCommandMixin, StreamsCommandMixin, MemoryCommandMixin, ModuleCommandMixin, MonitorCommandMixin,
-    ACLCommandMixin
+    TransactionCommandMixin, StreamsCommandMixin
 ]
 
 cluster_mixins = [

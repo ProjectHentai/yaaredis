@@ -221,12 +221,14 @@ class KeysCommandMixin:
         options = {'groups': len(get) if groups else None}
         return await self.execute_command('SORT', *pieces, **options)
 
-    async def touch(self, keys):
+    async def touch(self, *args):
         """
-        Alters the last access time of a key(s).
-        A key is ignored if it does not exist.
+        Alters the last access time of a key(s) ``*args``. A key is ignored
+        if it does not exist.
+
+        For more information check https://redis.io/commands/touch
         """
-        return await self.execute_command('TOUCH', *keys)
+        return self.execute_command('TOUCH', *args)
 
     async def ttl(self, name):
         """Returns the number of seconds until the key ``name`` will expire"""
