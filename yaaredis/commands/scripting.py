@@ -33,8 +33,8 @@ class ScriptingCommandMixin:
         """
         return await self.execute_command('EVALSHA', sha, numkeys, *keys_and_args)
 
-    async def script_debug(self, arg):
-        return await self.execute_command('SCRIPT DEBUG', arg) # todo danger
+    async def script_debug(self, *args):
+        return await self.execute_command('SCRIPT DEBUG', *args)  # todo danger
 
     async def script_exists(self, *args):
         """

@@ -134,11 +134,13 @@ class ListsCommandMixin:
         """Pushes ``values`` onto the head of the list ``name``"""
         return await self.execute_command('LPUSH', name, *values)
 
-    async def lpushx(self, name, value):
+    async def lpushx(self, name, *values):
         """
-        Pushes ``value`` onto the head of the list ``name`` if ``name`` exists
+        Push ``value`` onto the head of the list ``name`` if ``name`` exists
+
+        For more information check https://redis.io/commands/lpushx
         """
-        return await self.execute_command('LPUSHX', name, value)
+        return await self.execute_command('LPUSHX', name, *values)
 
     async def lrange(self, name, start, end):
         """
@@ -176,9 +178,20 @@ class ListsCommandMixin:
         """
         return await self.execute_command('LTRIM', name, start, end)
 
-    async def rpop(self, name):
-        """Removes and return the last item of the list ``name``"""
-        return await self.execute_command('RPOP', name)
+    async def rpop(self, name, count=None):
+        """
+        Removes and returns the last elements of the list ``name``.
+
+        By default, the command pops a single element from the end of the list.
+        When provided with the optional ``count`` argument, the reply will
+        consist of up to count elements, depending on the list's length.
+
+        For more information check https://redis.io/commands/rpop
+        """
+        if count is not None:
+            return await self.execute_command('RPOP', name, count)
+        else:
+            return await self.execute_command('RPOP', name)
 
     async def rpoplpush(self, src, dst):
         """

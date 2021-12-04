@@ -69,27 +69,70 @@ class SortedSetCommandMixin:
                             lambda r: r and (r[0], r[1], float(r[2])) or None)
     )
 
-    async def zadd(self, name, *args, **kwargs):
+    async def zadd(self, name, mapping, nx=False, xx=False, ch=False, incr=False,
+             gt=None, lt=None):
         """
-        Set any number of score, element-name pairs to the key ``name``. Pairs
-        can be specified in two ways:
+        Set any number of element-name, score pairs to the key ``name``. Pairs
+        are specified as a dict of element-names keys to score values.
 
-        As *args, in the form of: score1, name1, score2, name2, ...
-        or as **kwargs, in the form of: name1=score1, name2=score2, ...
+        ``nx`` forces ZADD to only create new elements and not to update
+        scores for elements that already exist.
 
-        The following example would add four values to the 'my-key' key:
-        redis.zadd('my-key', 1.1, 'name1', 2.2, 'name2', name3=3.3, name4=4.4)
+        ``xx`` forces ZADD to only update scores of elements that already
+        exist. New elements will not be added.
+
+        ``ch`` modifies the return value to be the numbers of elements changed.
+        Changed elements include new elements that were added and elements
+        whose scores changed.
+
+        ``incr`` modifies ZADD to behave like ZINCRBY. In this mode only a
+        single element/score pair can be specified and the score is the amount
+        the existing score will be incremented by. When using this mode the
+        return value of ZADD will be the new score of the element.
+
+        ``LT`` Only update existing elements if the new score is less than
+        the current score. This flag doesn't prevent adding new elements.
+
+        ``GT`` Only update existing elements if the new score is greater than
+        the current score. This flag doesn't prevent adding new elements.
+
+        The return value of ZADD varies based on the mode specified. With no
+        options, ZADD returns the number of new elements added to the sorted
+        set.
+
+        ``NX``, ``LT``, and ``GT`` are mutually exclusive options.
+
+        See: https://redis.io/commands/ZADD
         """
+        if not mapping:
+            raise DataError("ZADD requires at least one element/score pair")
+        if nx and xx:
+            raise DataError("ZADD allows either 'nx' or 'xx', not both")
+        if incr and len(mapping) != 1:
+            raise DataError("ZADD option 'incr' only works when passing a "
+                            "single element/score pair")
+        if nx is True and (gt is not None or lt is not None):
+            raise DataError("Only one of 'nx', 'lt', or 'gr' may be defined.")
+
         pieces = []
-        if args:
-            if len(args) % 2 != 0:
-                raise RedisError('ZADD requires an equal number of '
-                                 'values and scores')
-            pieces.extend(args)
-        for pair in iter(kwargs.items()):
+        options = {}
+        if nx:
+            pieces.append(b'NX')
+        if xx:
+            pieces.append(b'XX')
+        if ch:
+            pieces.append(b'CH')
+        if incr:
+            pieces.append(b'INCR')
+            options['as_score'] = True
+        if gt:
+            pieces.append(b'GT')
+        if lt:
+            pieces.append(b'LT')
+        for pair in mapping.items():
             pieces.append(pair[1])
             pieces.append(pair[0])
-        return await self.execute_command('ZADD', name, *pieces)
+        return await self.execute_command('ZADD', name, *pieces, **options)
 
     async def zaddoption(
             self, name, option=None,
@@ -157,9 +200,11 @@ class SortedSetCommandMixin:
         pieces = [len(keys), *keys]
         return await self.execute_command("ZDIFFSTORE", dest, *pieces)
 
-    async def zincrby(self, name, value, amount=1):
+    async def zincrby(self, name, amount, value):
         """
-        Increments the score of ``value`` in sorted set ``name`` by ``amount``
+        Increment the score of ``value`` in sorted set ``name`` by ``amount``
+
+        For more information check https://redis.io/commands/zincrby
         """
         return await self.execute_command('ZINCRBY', name, amount, value)
 

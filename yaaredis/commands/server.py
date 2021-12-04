@@ -1,7 +1,7 @@
 import datetime
 
 from yaaredis.monitor import Monitor
-from yaaredis.exceptions import RedisError, DataError, ModuleError
+from yaaredis.exceptions import RedisError, DataError, ModuleError, ConnectionError
 from yaaredis.utils import (b,
                             list_or_args,
                             bool_ok,
@@ -729,9 +729,19 @@ class ServerCommandMixin:
     async def debug_segfault(self):
         return await self.execute_command('DEBUG SEGFAULT')
 
-    async def flushall(self):
-        """Deletes all keys in all databases on the current host"""
-        return await self.execute_command('FLUSHALL')
+    async def flushall(self, asynchronous=False):
+        """
+        Delete all keys in all databases on the current host.
+
+        ``asynchronous`` indicates whether the operation is
+        executed asynchronously by the server.
+
+        For more information check https://redis.io/commands/flushall
+        """
+        args = []
+        if asynchronous:
+            args.append(b'ASYNC')
+        return await self.execute_command('FLUSHALL', *args)
 
     async def flushdb(self, asynchronous=False):
         """
@@ -847,14 +857,28 @@ class ServerCommandMixin:
         """
         return await Monitor.new(self.connection_pool)
 
-    async def shutdown(self):
-        """Stops Redis server"""
+    async def shutdown(self, save=False, nosave=False):
+        """Shutdown the Redis server.  If Redis has persistence configured,
+        data will be flushed before shutdown.  If the "save" option is set,
+        a data flush will be attempted even if there is no persistence
+        configured.  If the "nosave" option is set, no data flush will be
+        attempted.  The "save" and "nosave" options cannot both be set.
+
+        For more information check https://redis.io/commands/shutdown
+        """
+        if save and nosave:
+            raise DataError('SHUTDOWN save and nosave cannot both be set')
+        args = ['SHUTDOWN']
+        if save:
+            args.append('SAVE')
+        if nosave:
+            args.append('NOSAVE')
         try:
-            await self.execute_command('SHUTDOWN')
+            await self.execute_command(*args)
         except ConnectionError:
             # a ConnectionError here is expected
             return
-        raise RedisError('SHUTDOWN seems to have failed.')
+        raise RedisError("SHUTDOWN seems to have failed.")
 
     async def slaveof(self, host=None, port=None):
         """

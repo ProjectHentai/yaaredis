@@ -113,7 +113,7 @@ class GeoCommandMixin:
 
     async def georadius(self, name, longitude, latitude, radius, unit=None,
                         withdist=False, withcoord=False, withhash=False, count=None,
-                        sort=None, store=None, store_dist=None):
+                        sort=None, store=None, store_dist=None, any=False):
         """
         Return the members of the specified key identified by the
         ``name`` argument which are within the borders of the area specified
@@ -141,59 +141,75 @@ class GeoCommandMixin:
         ``store_dist`` indicates to save the places names in a sorted set
         named with a specific key, instead of ``store`` the sorted set
         destination score is set with the distance.
+
+        For more information check https://redis.io/commands/georadius
         """
         return await self._georadiusgeneric('GEORADIUS',
                                             name, longitude, latitude, radius,
                                             unit=unit, withdist=withdist,
                                             withcoord=withcoord, withhash=withhash,
                                             count=count, sort=sort, store=store,
-                                            store_dist=store_dist)
+                                            store_dist=store_dist, any=any)
 
     async def georadiusbymember(self, name, member, radius, unit=None,
                                 withdist=False, withcoord=False, withhash=False,
-                                count=None, sort=None, store=None, store_dist=None):
+                                count=None, sort=None, store=None, store_dist=None,
+                                any=False):
         """
         This command is exactly like ``georadius`` with the sole difference
         that instead of taking, as the center of the area to query, a longitude
         and latitude value, it takes the name of a member already existing
         inside the geospatial index represented by the sorted set.
+
+        For more information check https://redis.io/commands/georadiusbymember
         """
         return await self._georadiusgeneric('GEORADIUSBYMEMBER',
                                             name, member, radius, unit=unit,
                                             withdist=withdist, withcoord=withcoord,
                                             withhash=withhash, count=count,
                                             sort=sort, store=store,
-                                            store_dist=store_dist)
+                                            store_dist=store_dist, any=any)
 
     async def _georadiusgeneric(self, command, *args, **kwargs):
         pieces = list(args)
         if kwargs['unit'] and kwargs['unit'] not in ('m', 'km', 'mi', 'ft'):
-            raise RedisError('GEORADIUS invalid unit')
-        if kwargs['unit']:
+            raise DataError("GEORADIUS invalid unit")
+        elif kwargs['unit']:
             pieces.append(kwargs['unit'])
         else:
-            pieces.append('m')
+            pieces.append('m', )
 
-        for token in ('withdist', 'withcoord', 'withhash'):
-            if kwargs[token]:
-                pieces.append(b(token.upper()))
+        if kwargs['any'] and kwargs['count'] is None:
+            raise DataError("``any`` can't be provided without ``count``")
 
-        if kwargs['count']:
-            pieces.extend([b('COUNT'), kwargs['count']])
+        for arg_name, byte_repr in (
+                ('withdist', 'WITHDIST'),
+                ('withcoord', 'WITHCOORD'),
+                ('withhash', 'WITHHASH')):
+            if kwargs[arg_name]:
+                pieces.append(byte_repr)
 
-        if kwargs['sort'] and kwargs['sort'] not in ('ASC', 'DESC'):
-            raise RedisError('GEORADIUS invalid sort')
+        if kwargs['count'] is not None:
+            pieces.extend(['COUNT', kwargs['count']])
+            if kwargs['any']:
+                pieces.append('ANY')
+
         if kwargs['sort']:
-            pieces.append(b(kwargs['sort']))
+            if kwargs['sort'] == 'ASC':
+                pieces.append('ASC')
+            elif kwargs['sort'] == 'DESC':
+                pieces.append('DESC')
+            else:
+                raise DataError("GEORADIUS invalid sort")
 
         if kwargs['store'] and kwargs['store_dist']:
-            raise RedisError('GEORADIUS store and store_dist cant be set'
-                             ' together')
+            raise DataError("GEORADIUS store and store_dist cant be set"
+                            " together")
 
         if kwargs['store']:
-            pieces.extend([b('STORE'), kwargs['store']])
+            pieces.extend([b'STORE', kwargs['store']])
 
         if kwargs['store_dist']:
-            pieces.extend([b('STOREDIST'), kwargs['store_dist']])
+            pieces.extend([b'STOREDIST', kwargs['store_dist']])
 
         return await self.execute_command(command, *pieces, **kwargs)
