@@ -1,5 +1,6 @@
 import asyncio
 import sys
+from functools import partial
 
 from yaaredis.commands.cluster import ClusterCommandMixin
 from yaaredis.commands.connection import ClusterConnectionCommandMixin, ConnectionCommandMixin
@@ -19,6 +20,7 @@ from yaaredis.commands.sorted_set import SortedSetCommandMixin
 from yaaredis.commands.streams import StreamsCommandMixin
 from yaaredis.commands.strings import ClusterStringsCommandMixin, StringsCommandMixin
 from yaaredis.commands.transaction import ClusterTransactionCommandMixin, TransactionCommandMixin
+from yaaredis.commands.modules import ModuleCommandMixin
 from yaaredis.compat import CancelledError
 from yaaredis.connection import RedisSSLContext, UnixDomainSocketConnection
 from yaaredis.exceptions import (AskError,
@@ -40,7 +42,7 @@ mixins = [
     KeysCommandMixin, ListsCommandMixin, PubSubCommandMixin,
     ScriptingCommandMixin, SentinelCommandMixin, ServerCommandMixin,
     SetsCommandMixin, SortedSetCommandMixin, StringsCommandMixin,
-    TransactionCommandMixin, StreamsCommandMixin
+    TransactionCommandMixin, StreamsCommandMixin, ModuleCommandMixin
 ]
 
 cluster_mixins = [
@@ -206,6 +208,10 @@ class StrictRedis(*mixins):
                                   transaction, shard_hint)
         await pipeline.reset()
         return pipeline
+
+    def __getattr__(self, command):
+        command = command.upper().replace("_", " ")
+        return partial(self.execute_command, command)
 
 
 class StrictRedisCluster(StrictRedis, *cluster_mixins):

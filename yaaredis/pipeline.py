@@ -16,11 +16,10 @@ from yaaredis.exceptions import (AskError,
                                  TryAgainError,
                                  WatchError)  # pylint: disable=redefined-builtin
 
-from yaaredis.utils import clusterdown_wrapper, dict_merge
+from yaaredis.utils import clusterdown_wrapper, dict_merge, safe_str
 
 ERRORS_ALLOW_RETRY = (ConnectionError, TimeoutError,
                       MovedError, AskError, TryAgainError)
-
 
 
 class BasePipeline:
@@ -244,11 +243,10 @@ class BasePipeline:
                 self.annotate_exception(r, i + 1, commands[i][0])
                 raise r
 
-    @staticmethod
-    def annotate_exception(exception, number, command):
-        cmd = ' '.join(map(str, command))
+    def annotate_exception(self, exception, number, command):
+        cmd = ' '.join(map(safe_str, command))
         msg = 'Command # %d (%s) of pipeline caused error: %s' % (
-            number, cmd, str(exception.args[0]))
+            number, cmd, exception.args[0])
         exception.args = (msg,) + exception.args[1:]
 
     async def _parse(self, connection, command_name, **options):
