@@ -66,6 +66,12 @@ class PubSub:
     def close(self):
         self.reset()
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_value, traceback):
+        self.reset()
+
     async def on_connect(self, _connection):
         """Re-subscribe to any previously subscribed channels and patterns"""
         # NOTE: for python3, we can't pass bytestrings as keyword arguments

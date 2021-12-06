@@ -1,5 +1,5 @@
 from yaaredis.exceptions import RedisError, DataError
-from yaaredis.utils import b, nativestr
+from yaaredis.utils import nativestr, float_or_none, str_if_bytes
 
 
 def parse_georadius_generic(response, **options):
@@ -33,16 +33,53 @@ def parse_georadius_generic(response, **options):
     ]
 
 
+def parse_geosearch_generic(response, **options):
+    """
+    Parse the response of 'GEOSEARCH', GEORADIUS' and 'GEORADIUSBYMEMBER'
+    commands according to 'withdist', 'withhash' and 'withcoord' labels.
+    """
+    if options['store'] or options['store_dist']:
+        # `store` and `store_dist` cant be combined
+        # with other command arguments.
+        # relevant to 'GEORADIUS' and 'GEORADIUSBYMEMBER'
+        return response
+
+    if type(response) != list:
+        response_list = [response]
+    else:
+        response_list = response
+
+    if not options['withdist'] and not options['withcoord'] \
+            and not options['withhash']:
+        # just a bunch of places
+        return response_list
+
+    cast = {
+        'withdist': float,
+        'withcoord': lambda ll: (float(ll[0]), float(ll[1])),
+        'withhash': int
+    }
+
+    # zip all output results with each casting function to get
+    # the properly native Python value.
+    f = [lambda x: x]
+    f += [cast[o] for o in ['withdist', 'withhash', 'withcoord'] if options[o]]
+    return [
+        list(map(lambda fv: fv[0](fv[1]), zip(f, r))) for r in response_list
+    ]
+
+
 class GeoCommandMixin:
     RESPONSE_CALLBACKS = {
         'GEOPOS': lambda r: list(map(lambda ll: (float(ll[0]),
                                                  float(ll[1]))
         if ll is not None else None, r)),
-        'GEOHASH': list,
-        'GEORADIUS': parse_georadius_generic,
-        'GEORADIUSBYMEMBER': parse_georadius_generic,
-        'GEODIST': float,
+        'GEOHASH': lambda r: list(map(str_if_bytes, r)),
+        'GEORADIUS': parse_geosearch_generic,
+        'GEORADIUSBYMEMBER': parse_geosearch_generic,
+        'GEODIST': float_or_none,
         'GEOADD': int,
+        'GEOSEARCH': parse_geosearch_generic
     }
 
     # GEO COMMANDS
@@ -170,6 +207,77 @@ class GeoCommandMixin:
                                             sort=sort, store=store,
                                             store_dist=store_dist, any=any)
 
+    async def geosearch(self, name, member=None, longitude=None, latitude=None,
+                        unit='m', radius=None, width=None, height=None, sort=None,
+                        count=None, any=False, withcoord=False,
+                        withdist=False, withhash=False):
+        """
+        Return the members of specified key identified by the
+        ``name`` argument, which are within the borders of the
+        area specified by a given shape. This command extends the
+        GEORADIUS command, so in addition to searching within circular
+        areas, it supports searching within rectangular areas.
+        This command should be used in place of the deprecated
+        GEORADIUS and GEORADIUSBYMEMBER commands.
+        ``member`` Use the position of the given existing
+         member in the sorted set. Can't be given with ``longitude``
+         and ``latitude``.
+        ``longitude`` and ``latitude`` Use the position given by
+        this coordinates. Can't be given with ``member``
+        ``radius`` Similar to GEORADIUS, search inside circular
+        area according the given radius. Can't be given with
+        ``height`` and ``width``.
+        ``height`` and ``width`` Search inside an axis-aligned
+        rectangle, determined by the given height and width.
+        Can't be given with ``radius``
+        ``unit`` must be one of the following : m, km, mi, ft.
+        `m` for meters (the default value), `km` for kilometers,
+        `mi` for miles and `ft` for feet.
+        ``sort`` indicates to return the places in a sorted way,
+        ASC for nearest to farest and DESC for farest to nearest.
+        ``count`` limit the results to the first count matching items.
+        ``any`` is set to True, the command will return as soon as
+        enough matches are found. Can't be provided without ``count``
+        ``withdist`` indicates to return the distances of each place.
+        ``withcoord`` indicates to return the latitude and longitude of
+        each place.
+        ``withhash`` indicates to return the geohash string of each place.
+
+        For more information check https://redis.io/commands/geosearch
+        """
+
+        return await self._geosearchgeneric('GEOSEARCH',
+                                            name, member=member, longitude=longitude,
+                                            latitude=latitude, unit=unit,
+                                            radius=radius, width=width,
+                                            height=height, sort=sort, count=count,
+                                            any=any, withcoord=withcoord,
+                                            withdist=withdist, withhash=withhash,
+                                            store=None, store_dist=None)
+
+    async def geosearchstore(self, dest, name, member=None, longitude=None,
+                             latitude=None, unit='m', radius=None, width=None,
+                             height=None, sort=None, count=None, any=False,
+                             storedist=False):
+        """
+        This command is like GEOSEARCH, but stores the result in
+        ``dest``. By default, it stores the results in the destination
+        sorted set with their geospatial information.
+        if ``store_dist`` set to True, the command will stores the
+        items in a sorted set populated with their distance from the
+        center of the circle or box, as a floating-point number.
+
+        For more information check https://redis.io/commands/geosearchstore
+        """
+        return await self._geosearchgeneric('GEOSEARCHSTORE',
+                                            dest, name, member=member,
+                                            longitude=longitude, latitude=latitude,
+                                            unit=unit, radius=radius, width=width,
+                                            height=height, sort=sort, count=count,
+                                            any=any, withcoord=None,
+                                            withdist=None, withhash=None,
+                                            store=None, store_dist=storedist)
+
     async def _georadiusgeneric(self, command, *args, **kwargs):
         pieces = list(args)
         if kwargs['unit'] and kwargs['unit'] not in ('m', 'km', 'mi', 'ft'):
@@ -211,5 +319,69 @@ class GeoCommandMixin:
 
         if kwargs['store_dist']:
             pieces.extend([b'STOREDIST', kwargs['store_dist']])
+
+        return await self.execute_command(command, *pieces, **kwargs)
+
+    async def _geosearchgeneric(self, command, *args, **kwargs):
+        pieces = list(args)
+
+        # FROMMEMBER or FROMLONLAT
+        if kwargs['member'] is None:
+            if kwargs['longitude'] is None or kwargs['latitude'] is None:
+                raise DataError("GEOSEARCH must have member or"
+                                " longitude and latitude")
+        if kwargs['member']:
+            if kwargs['longitude'] or kwargs['latitude']:
+                raise DataError("GEOSEARCH member and longitude or latitude"
+                                " cant be set together")
+            pieces.extend([b'FROMMEMBER', kwargs['member']])
+        if kwargs['longitude'] and kwargs['latitude']:
+            pieces.extend([b'FROMLONLAT',
+                           kwargs['longitude'], kwargs['latitude']])
+
+        # BYRADIUS or BYBOX
+        if kwargs['radius'] is None:
+            if kwargs['width'] is None or kwargs['height'] is None:
+                raise DataError("GEOSEARCH must have radius or"
+                                " width and height")
+        if kwargs['unit'] is None:
+            raise DataError("GEOSEARCH must have unit")
+        if kwargs['unit'].lower() not in ('m', 'km', 'mi', 'ft'):
+            raise DataError("GEOSEARCH invalid unit")
+        if kwargs['radius']:
+            if kwargs['width'] or kwargs['height']:
+                raise DataError("GEOSEARCH radius and width or height"
+                                " cant be set together")
+            pieces.extend([b'BYRADIUS', kwargs['radius'], kwargs['unit']])
+        if kwargs['width'] and kwargs['height']:
+            pieces.extend([b'BYBOX',
+                           kwargs['width'], kwargs['height'], kwargs['unit']])
+
+        # sort
+        if kwargs['sort']:
+            if kwargs['sort'].upper() == 'ASC':
+                pieces.append(b'ASC')
+            elif kwargs['sort'].upper() == 'DESC':
+                pieces.append(b'DESC')
+            else:
+                raise DataError("GEOSEARCH invalid sort")
+
+        # count any
+        if kwargs['count']:
+            pieces.extend([b'COUNT', kwargs['count']])
+            if kwargs['any']:
+                pieces.append(b'ANY')
+        elif kwargs['any']:
+            raise DataError("GEOSEARCH ``any`` can't be provided "
+                            "without count")
+
+        # other properties
+        for arg_name, byte_repr in (
+                ('withdist', b'WITHDIST'),
+                ('withcoord', b'WITHCOORD'),
+                ('withhash', b'WITHHASH'),
+                ('store_dist', b'STOREDIST')):
+            if kwargs[arg_name]:
+                pieces.append(byte_repr)
 
         return await self.execute_command(command, *pieces, **kwargs)

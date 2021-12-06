@@ -3,8 +3,8 @@ import datetime
 import time
 from collections import defaultdict
 
-from yaaredis.exceptions import RedisError
-from yaaredis.utils import bool_ok, dict_merge, list_or_args, nativestr, NodeFlag, string_keys_to_dict, str_if_bytes
+from yaaredis.exceptions import RedisError, DataError
+from yaaredis.utils import bool_ok, dict_merge, list_or_args, NodeFlag, string_keys_to_dict, str_if_bytes
 
 
 def parse_stralgo(response, **options):
@@ -33,6 +33,20 @@ def parse_stralgo(response, **options):
             str_if_bytes(response[2]): int(response[3])
         }
     return str_if_bytes(response)
+
+
+def parse_set_result(response, **options):
+    """
+    Handle SET result since GET argument is available since Redis 6.2.
+    Parsing SET result into:
+    - BOOL
+    - String when GET argument is used
+    """
+    if options.get('get'):
+        # Redis will return a getCommand result.
+        # See `setGenericCommand` in t_string.c
+        return response
+    return response and str_if_bytes(response) == 'OK'
 
 
 class BitFieldOperation:
@@ -146,7 +160,7 @@ class StringsCommandMixin:
         {
             'INCRBYFLOAT': float,
             'MSET': bool_ok,
-            'SET': lambda r: r and nativestr(r) == 'OK',
+            'SET': parse_set_result,
             'STRALGO': parse_stralgo,
         },
     )

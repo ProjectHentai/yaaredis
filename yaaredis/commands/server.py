@@ -75,13 +75,26 @@ def int_or_none(response):
     return int(response)
 
 
-def parse_slowlog_get(response, **_options):
-    return [{
-        'id': item[0],
-        'start_time': int(item[1]),
-        'duration': int(item[2]),
-        'command': b(' ').join(item[3]),
-    } for item in response]
+def parse_slowlog_get(response, **options):
+    space = ' ' if options.get('decode_responses', False) else b' '
+
+    def parse_item(item):
+        result = {
+            'id': item[0],
+            'start_time': int(item[1]),
+            'duration': int(item[2]),
+        }
+        # Redis Enterprise injects another entry at index [3], which has
+        # the complexity info (i.e. the value N in case the command has
+        # an O(N) complexity) instead of the command.
+        if isinstance(item[3], list):
+            result['command'] = space.join(item[3])
+        else:
+            result['complexity'] = item[3]
+            result['command'] = space.join(item[4])
+        return result
+
+    return [parse_item(item) for item in response]
 
 
 def parse_client_list(response, **options):
@@ -111,9 +124,9 @@ def parse_client_info(value):
     return client_info
 
 
-def parse_config_get(response, **_options):
-    response = [nativestr(i) if i is not None else None for i in response]
-    return pairs_to_dict(response) if response else {}
+def parse_config_get(response, **options):
+    response = [str_if_bytes(i) if i is not None else None for i in response]
+    return response and pairs_to_dict(response) or {}
 
 
 def timestamp_to_datetime(response):
@@ -146,16 +159,17 @@ def parse_debug_object(response):
 
 
 def parse_info(response):
-    """Parses the result of Redis's INFO command into a Python dict"""
+    """Parse the result of Redis's INFO command into a Python dict"""
     info = {}
-    response = nativestr(response)
+    response = str_if_bytes(response)
 
     def get_value(value):
         if ',' not in value or '=' not in value:
             try:
                 if '.' in value:
                     return float(value)
-                return int(value)
+                else:
+                    return int(value)
             except ValueError:
                 return value
         else:
@@ -168,8 +182,19 @@ def parse_info(response):
     for line in response.splitlines():
         if line and not line.startswith('#'):
             if line.find(':') != -1:
+                # Split, the info fields keys and values.
+                # Note that the value may contain ':'. but the 'host:'
+                # pseudo-command is the only case where the key contains ':'
                 key, value = line.split(':', 1)
-                info[key] = get_value(value)
+                if key == 'cmdstat_host':
+                    key, value = line.rsplit(':', 1)
+
+                if key == 'module':
+                    # Hardcode a list for key 'modules' since there could be
+                    # multiple lines that started with 'module'
+                    info.setdefault('modules', []).append(get_value(value))
+                else:
+                    info[key] = get_value(value)
             else:
                 # if the line isn't splittable, append it to the "__raw__" key
                 info.setdefault('__raw__', []).append(line)
@@ -238,7 +263,7 @@ class ServerCommandMixin:
         string_keys_to_dict('BGREWRITEAOF BGSAVE', lambda r: True),
         string_keys_to_dict(
             'FLUSHALL FLUSHDB SAVE '
-            'SHUTDOWN SLAVEOF', bool_ok,
+            'SHUTDOWN SLAVEOF SWAPDB', bool_ok,
         ),
         {
             'ACL CAT': lambda r: list(map(str_if_bytes, r)),
@@ -261,6 +286,7 @@ class ServerCommandMixin:
             'CLIENT KILL': parse_client_kill,
             'CLIENT LIST': parse_client_list,
             'CLIENT INFO': parse_client_info,
+            'CLIENT GETNAME': str_if_bytes,
             'CLIENT SETNAME': bool_ok,
             'CLIENT UNBLOCK': lambda r: r and int(r) == 1 or False,
             'CLIENT PAUSE': bool_ok,
@@ -279,6 +305,7 @@ class ServerCommandMixin:
             'MODULE LOAD': parse_module_result,
             'MODULE UNLOAD': parse_module_result,
             'MODULE LIST': lambda r: [pairs_to_dict(m) for m in r],
+            'COMMAND COUNT': int
         },
     )
 
@@ -575,8 +602,52 @@ class ServerCommandMixin:
         return self.execute_command('BGSAVE', *pieces)
 
     async def client_kill(self, address):
-        """Disconnects the client at ``address`` (ip:port)"""
+        """Disconnects the client at ``address`` (ip:port)
+
+        For more information check https://redis.io/commands/client-kill
+        """
         return await self.execute_command('CLIENT KILL', address)
+
+    async def client_kill_filter(self, _id=None, _type=None, addr=None,
+                                 skipme=None, laddr=None, user=None):
+        """
+        Disconnects client(s) using a variety of filter options
+        :param id: Kills a client by its unique ID field
+        :param type: Kills a client by type where type is one of 'normal',
+        'master', 'slave' or 'pubsub'
+        :param addr: Kills a client by its 'address:port'
+        :param skipme: If True, then the client calling the command
+        will not get killed even if it is identified by one of the filter
+        options. If skipme is not provided, the server defaults to skipme=True
+        :param laddr: Kills a client by its 'local (bind) address:port'
+        :param user: Kills a client for a specific user name
+        """
+        args = []
+        if _type is not None:
+            client_types = ('normal', 'master', 'slave', 'pubsub')
+            if str(_type).lower() not in client_types:
+                raise DataError("CLIENT KILL type must be one of %r" % (
+                    client_types,))
+            args.extend((b'TYPE', _type))
+        if skipme is not None:
+            if not isinstance(skipme, bool):
+                raise DataError("CLIENT KILL skipme must be a bool")
+            if skipme:
+                args.extend((b'SKIPME', b'YES'))
+            else:
+                args.extend((b'SKIPME', b'NO'))
+        if _id is not None:
+            args.extend((b'ID', _id))
+        if addr is not None:
+            args.extend((b'ADDR', addr))
+        if laddr is not None:
+            args.extend((b'LADDR', laddr))
+        if user is not None:
+            args.extend((b'USER', user))
+        if not args:
+            raise DataError("CLIENT KILL <filter> <value> ... ... <filter> "
+                            "<value> must specify at least one filter")
+        return await self.execute_command('CLIENT KILL', *args)
 
     async def client_info(self):
         """
@@ -857,6 +928,20 @@ class ServerCommandMixin:
         """
         return await Monitor.new(self.connection_pool)
 
+    async def psync(self, replicationid, offset):
+        return await self.execute_command('PSYNC', replicationid, offset)
+
+    async def replicaof(self, *args):
+        """
+        Update the replication settings of a redis replica, on the fly.
+        Examples of valid arguments include:
+            NO ONE (set no replication)
+            host port (set to the host and port of a redis server)
+
+        For more information check  https://redis.io/commands/replicaof
+        """
+        return await self.execute_command('REPLICAOF', *args)
+
     async def shutdown(self, save=False, nosave=False):
         """Shutdown the Redis server.  If Redis has persistence configured,
         data will be flushed before shutdown.  If the "save" option is set,
@@ -892,13 +977,20 @@ class ServerCommandMixin:
 
     async def slowlog_get(self, num=None):
         """
-        Gets the entries from the slowlog. If ``num`` is specified, get the
+        Get the entries from the slowlog. If ``num`` is specified, get the
         most recent ``num`` items.
+
+        For more information check https://redis.io/commands/slowlog-get
         """
         args = ['SLOWLOG GET']
         if num is not None:
             args.append(num)
-        return await self.execute_command(*args)
+        decode_responses = self.connection_pool.connection_kwargs.get(
+            'decode_responses', False)
+        return await self.execute_command(*args, decode_responses=decode_responses)
+
+    async def slowlog_help(self):
+        return await self.execute_command('SLOWLOG HELP')
 
     async def slowlog_len(self):
         """Gets the number of items in the slowlog"""
@@ -907,6 +999,9 @@ class ServerCommandMixin:
     async def slowlog_reset(self):
         """Removes all items in the slowlog"""
         return await self.execute_command('SLOWLOG RESET')
+
+    async def sync(self):
+        return await self.execute_command('SYNC')
 
     async def time(self):
         """
@@ -936,6 +1031,26 @@ class ServerCommandMixin:
             return await self.execute_command('LOLWUT VERSION', *version_numbers)
         else:
             return await self.execute_command('LOLWUT')
+
+    async def swapdb(self, first, second):
+        """
+        Swap two databases
+
+        For more information check https://redis.io/commands/swapdb
+        """
+        return await self.execute_command('SWAPDB', first, second)
+
+    async def command(self):
+        return await self.execute_command('COMMAND')
+
+    async def command_getkeys(self):
+        return await self.execute_command('COMMAND GETKEYS')
+
+    async def command_info(self):
+        return await self.execute_command('COMMAND INFO')
+
+    async def command_count(self):
+        return await self.execute_command('COMMAND COUNT')
 
 
 class ClusterServerCommandMixin(ServerCommandMixin):

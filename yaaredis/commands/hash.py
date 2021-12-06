@@ -9,7 +9,7 @@ def parse_hscan(response, **_options):
 
 class HashCommandMixin:
     RESPONSE_CALLBACKS = dict_merge(
-        string_keys_to_dict('HDEL HLEN', int),
+        string_keys_to_dict('HDEL HLEN HSTRLEN', int),
         string_keys_to_dict('HEXISTS HMSET', bool),
         {
             'HGETALL': lambda r: r and pairs_to_dict(r) or {},
@@ -97,6 +97,28 @@ class HashCommandMixin:
         """Returns a list of values ordered identically to ``keys``"""
         args = list_or_args(keys, args)
         return await self.execute_command('HMGET', name, *args)
+
+    async def hrandfield(self, key, count=None, withvalues=False):
+        """
+        Return a random field from the hash value stored at key.
+
+        count: if the argument is positive, return an array of distinct fields.
+        If called with a negative count, the behavior changes and the command
+        is allowed to return the same field multiple times. In this case,
+        the number of returned fields is the absolute value of the
+        specified count.
+        withvalues: The optional WITHVALUES modifier changes the reply so it
+        includes the respective values of the randomly selected hash fields.
+
+        For more information check https://redis.io/commands/hrandfield
+        """
+        params = []
+        if count is not None:
+            params.append(count)
+        if withvalues:
+            params.append("WITHVALUES")
+
+        return await self.execute_command("HRANDFIELD", key, *params)
 
     async def hvals(self, name):
         """Returns the list of values within hash ``name``"""

@@ -94,6 +94,12 @@ def list_or_args(keys, args: list = None) -> list:
     return keys
 
 
+def float_or_none(response):
+    if response is None:
+        return None
+    return float(response)
+
+
 def int_or_none(response):
     if response is None:
         return None

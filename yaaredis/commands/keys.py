@@ -8,6 +8,7 @@ from yaaredis.utils import (b,
                             first_key,
                             int_or_none,
                             list_keys_to_dict,
+                            list_or_args,
                             merge_result,
                             NodeFlag,
                             string_keys_to_dict)
@@ -18,10 +19,10 @@ def sort_return_tuples(response, **options):
     If ``groups`` is specified, return the response as a list of
     n-element tuples with n being the value found in options['groups']
     """
-    if not response or not options['groups']:
+    if not response or not options.get('groups'):
         return response
     n = options['groups']
-    return list(zip(*(response[i::n] for i in range(n))))
+    return list(zip(*[response[i::n] for i in range(n)]))
 
 
 def parse_object(response, infotype):
@@ -40,13 +41,13 @@ class KeysCommandMixin:
     # pylint: disable=too-many-public-methods
     RESPONSE_CALLBACKS = dict_merge(
         string_keys_to_dict(
-            'EXPIRE EXPIREAT'
-            'MOVE PERSIST RENAMENX', bool,
+            'EXPIRE EXPIREAT MOVE PERSIST RENAMENX PEXPIRE PEXPIREAT', bool
         ),
         {
             'COPY': bool,
             'DEL': int,
             'EXISTS': int,
+            'UNLINK': int,
             'SORT': sort_return_tuples,
             'OBJECT': parse_object,
             'RANDOMKEY': lambda r: r and r or None,
@@ -116,6 +117,43 @@ class KeysCommandMixin:
         """Returns a list of keys matching ``pattern``"""
         return await self.execute_command('KEYS', pattern)
 
+    async def migrate(self, host, port, keys, destination_db, timeout,
+                      copy=False, replace=False, auth=None):
+        """
+        Migrate 1 or more keys from the current Redis server to a different
+        server specified by the ``host``, ``port`` and ``destination_db``.
+
+        The ``timeout``, specified in milliseconds, indicates the maximum
+        time the connection between the two servers can be idle before the
+        command is interrupted.
+
+        If ``copy`` is True, the specified ``keys`` are NOT deleted from
+        the source server.
+
+        If ``replace`` is True, this operation will overwrite the keys
+        on the destination server if they exist.
+
+        If ``auth`` is specified, authenticate to the destination server with
+        the password provided.
+
+        For more information check https://redis.io/commands/migrate
+        """
+        keys = list_or_args(keys, [])
+        if not keys:
+            raise DataError('MIGRATE requires at least one key')
+        pieces = []
+        if copy:
+            pieces.append(b'COPY')
+        if replace:
+            pieces.append(b'REPLACE')
+        if auth:
+            pieces.append(b'AUTH')
+            pieces.append(auth)
+        pieces.append(b'KEYS')
+        pieces.extend(keys)
+        return await self.execute_command('MIGRATE', host, port, '', destination_db,
+                                          timeout, *pieces)
+
     async def move(self, name, db):
         """Moves the key ``name`` to a different Redis database ``db``"""
         return await self.execute_command('MOVE', name, db)
@@ -128,7 +166,7 @@ class KeysCommandMixin:
         """Removes an expiration on ``name``"""
         return await self.execute_command('PERSIST', name)
 
-    async def pexpire(self, name, time):
+    async def pexpire(self, name, time, nx=None, xx=None, gt=None, lt=None):
         """
         Set an expire flag on key ``name`` for ``time`` milliseconds.
         ``time`` can be represented by an integer or a Python timedelta
@@ -137,7 +175,16 @@ class KeysCommandMixin:
         if isinstance(time, datetime.timedelta):
             ms = int(time.microseconds / 1000)
             time = (time.seconds + time.days * 24 * 3600) * 1000 + ms
-        return await self.execute_command('PEXPIRE', name, time)
+        pieces = [name, time]
+        if nx is not None:
+            pieces.append(b'NX')
+        if xx is not None:
+            pieces.append(b'XX')
+        if gt is not None:
+            pieces.append(b'GT')
+        if lt is not None:
+            pieces.append(b'LT')
+        return await self.execute_command('PEXPIRE', *pieces)
 
     async def pexpireat(self, name, when):
         """

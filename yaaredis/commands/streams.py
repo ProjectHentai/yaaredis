@@ -57,17 +57,58 @@ def parse_xread(response):
     return [[r[0], parse_stream_list(r[1])] for r in response]
 
 
+def parse_xclaim(response, **options):
+    if options.get('parse_justid', False):
+        return response
+    return parse_stream_list(response)
+
+
+def parse_xautoclaim(response, **options):
+    if options.get('parse_justid', False):
+        return response[1]
+    return parse_stream_list(response[1])
+
+
+def pairs_to_dict_with_str_keys(response):
+    return pairs_to_dict(response, decode_keys=True)
+
+
+def parse_list_of_dicts(response):
+    return list(map(pairs_to_dict_with_str_keys, response))
+
+
+def parse_xpending_range(response):
+    k = ('message_id', 'consumer', 'time_since_delivered', 'times_delivered')
+    return [dict(zip(k, r)) for r in response]
+
+
+def parse_xpending(response, **options):
+    if options.get('parse_detail', False):
+        return parse_xpending_range(response)
+    consumers = [{'name': n, 'pending': int(p)} for n, p in response[3] or []]
+    return {
+        'pending': response[0],
+        'min': response[1],
+        'max': response[2],
+        'consumers': consumers
+    }
+
 class StreamsCommandMixin:
     RESPONSE_CALLBACKS = dict_merge(
+        string_keys_to_dict('XACK XDEL XLEN XTRIM', int),
         string_keys_to_dict('XREVRANGE XRANGE', parse_stream_list),
         string_keys_to_dict('XREAD XREADGROUP', parse_xread),
         {
-            'XINFO GROUPS': list_of_pairs_to_dict,
+            'XINFO GROUPS': parse_list_of_dicts,
             'XINFO STREAM': parse_xinfo_stream,
-            'XINFO CONSUMERS': list_of_pairs_to_dict,
+            'XINFO CONSUMERS': parse_list_of_dicts,
             'XGROUP SETID': bool_ok,
             'XGROUP CREATE': bool_ok,
-            'XGROUP DESTROY': bool
+            'XGROUP DESTROY': bool,
+            'XCLAIM': parse_xclaim,
+            'XAUTOCLAIM': parse_xautoclaim,
+            'XGROUP DELCONSUMER': int,
+            'XPENDING': parse_xpending
         },
     )
 
@@ -368,6 +409,48 @@ class StreamsCommandMixin:
         For more information check https://redis.io/commands/xack
         """
         return await self.execute_command('XACK', name, groupname, *ids)
+
+    async def xautoclaim(self, name, groupname, consumername, min_idle_time,
+                         start_id=0, count=None, justid=False):
+        """
+        Transfers ownership of pending stream entries that match the specified
+        criteria. Conceptually, equivalent to calling XPENDING and then XCLAIM,
+        but provides a more straightforward way to deal with message delivery
+        failures via SCAN-like semantics.
+        name: name of the stream.
+        groupname: name of the consumer group.
+        consumername: name of a consumer that claims the message.
+        min_idle_time: filter messages that were idle less than this amount of
+        milliseconds.
+        start_id: filter messages with equal or greater ID.
+        count: optional integer, upper limit of the number of entries that the
+        command attempts to claim. Set to 100 by default.
+        justid: optional boolean, false by default. Return just an array of IDs
+        of messages successfully claimed, without returning the actual message
+
+        For more information check https://redis.io/commands/xautoclaim
+        """
+        try:
+            if int(min_idle_time) < 0:
+                raise DataError("XAUTOCLAIM min_idle_time must be a non"
+                                "negative integer")
+        except TypeError:
+            pass
+
+        kwargs = {}
+        pieces = [name, groupname, consumername, min_idle_time, start_id]
+
+        try:
+            if int(count) < 0:
+                raise DataError("XPENDING count must be a integer >= 0")
+            pieces.extend([b'COUNT', count])
+        except TypeError:
+            pass
+        if justid:
+            pieces.append(b'JUSTID')
+            kwargs['parse_justid'] = True
+
+        return await self.execute_command('XAUTOCLAIM', *pieces, **kwargs)
 
     async def xclaim(self, name, groupname, consumername, min_idle_time, message_ids,
                      idle=None, time=None, retrycount=None, force=False,

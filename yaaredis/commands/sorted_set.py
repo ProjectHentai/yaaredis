@@ -1,15 +1,12 @@
 # pylint: disable=redefined-builtin
 from yaaredis.exceptions import RedisError, DataError
-from yaaredis.utils import b, dict_merge, first_key, int_or_none, string_keys_to_dict, list_or_args
+from yaaredis.utils import b, dict_merge, first_key, int_or_none, string_keys_to_dict, list_or_args, float_or_none
 
 # todo need functions and check callbacs
 VALID_ZADD_OPTIONS = {'NX', 'XX', 'CH', 'INCR'}
 
 
-def float_or_none(response):
-    if response is None:
-        return None
-    return float(response)
+
 
 
 def zset_score_pairs(response, **options):
