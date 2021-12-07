@@ -19,11 +19,11 @@ class PubSub:
     PUBLISH_MESSAGE_TYPES = ('message', 'pmessage')
     UNSUBSCRIBE_MESSAGE_TYPES = ('unsubscribe', 'punsubscribe')
 
-    def __init__(self, connection_pool, ignore_subscribe_messages=False):
+    def __init__(self, connection_pool, shard_hint=None, ignore_subscribe_messages=False):
         self.connection_pool = connection_pool
+        self.shard_hint = shard_hint
         self.ignore_subscribe_messages = ignore_subscribe_messages
         self.connection = None
-
         # see `self._ensure_encoding()`
         self.encoding = SENTINEL
         self.decode_responses = SENTINEL
@@ -72,7 +72,7 @@ class PubSub:
     async def __aexit__(self, exc_type, exc_value, traceback):
         self.reset()
 
-    async def on_connect(self, _connection):
+    async def on_connect(self, connection):
         """Re-subscribe to any previously subscribed channels and patterns"""
         # NOTE: for python3, we can't pass bytestrings as keyword arguments
         # so we need to decode channel/pattern names back to str strings
@@ -124,23 +124,23 @@ class PubSub:
         connection = self.connection
         await self._execute(connection, connection.send_command, *args)
 
-    async def _execute(self, connection, command, *args):
+    async def _execute(self, conn, command, *args, **kwargs):
         try:
-            return await command(*args)
+            return await command(*args, **kwargs)
         except CancelledError:
             # do not retry if coroutine is cancelled
-            if await connection.can_read():
+            if await conn.can_read():
                 # disconnect if buffer is not empty in case of error
                 # when connection is reused
-                connection.disconnect()
+                conn.disconnect()
             raise
         except (ConnectionError, TimeoutError) as e:
-            connection.disconnect()
-            if not connection.retry_on_timeout and isinstance(e, TimeoutError):
+            conn.disconnect()
+            if not conn.retry_on_timeout and isinstance(e, TimeoutError):
                 raise
             # Connect manually here. If the Redis server is down, this will
             # fail and raise a ConnectionError as desired.
-            await connection.connect()
+            await conn.connect()
             # the ``on_connect`` callback should haven been called by the
             # connection to resubscribe us to any channels and patterns we were
             # previously listening to
@@ -303,7 +303,7 @@ class PubSub:
 
         return message
 
-    def run_in_thread(self, daemon=False, poll_timeout=1.0):
+    def run_in_thread(self, sleep_time=1.0, daemon=False, exception_handler=None):
         for channel, handler in iter(self.channels.items()):
             if handler is None:
                 raise PubSubError("Channel: '{}' has no handler registered"
@@ -313,17 +313,19 @@ class PubSub:
                 raise PubSubError("Pattern: '{}' has no handler registered"
                                   .format(pattern))
         thread = PubSubWorkerThread(self, daemon=daemon,
-                                    poll_timeout=poll_timeout)
+                                    sleep_time=sleep_time,
+                                    exception_handler=exception_handler)
         thread.start()
         return thread
 
 
 class PubSubWorkerThread(threading.Thread):
-    def __init__(self, pubsub, daemon=False, poll_timeout=1.0):
+    def __init__(self, pubsub, daemon=False, sleep_time=1.0, exception_handler=None):
         super().__init__()
         self.daemon = daemon
         self.pubsub = pubsub
-        self.poll_timeout = poll_timeout
+        self.sleep_time = sleep_time
+        self.exception_handler = exception_handler
         self._running = False
         # Make sure we have the current thread loop before we
         # fork into the new thread. If not loop has been set on the connection
@@ -333,8 +335,15 @@ class PubSubWorkerThread(threading.Thread):
     async def _run(self):
         pubsub = self.pubsub
         while pubsub.subscribed:
-            await pubsub.get_message(ignore_subscribe_messages=True,
-                                     timeout=self.poll_timeout)
+            try:
+                await pubsub.get_message(ignore_subscribe_messages=True,
+                                         timeout=self.sleep_time)
+            except BaseException as e:
+                if self.exception_handler is None:
+                    raise
+                coro = self.exception_handler(e, pubsub, self)
+                if asyncio.iscoroutine(coro):
+                    await coro
         pubsub.close()
         self._running = False
 
